@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<title>Cortez · Tactical Table</title>
-<meta name="description" content="A live, host-run tactical battlemap for the Cortez deck plan.">
+<title>Marine Commander · Tactical Table</title>
+<meta name="description" content="A live, host-run tactical battlemap for Cortez, Kamekh, Dorkir and Dorkathi deck plans.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
@@ -15,8 +15,8 @@
 <div class="boot" id="boot">
   <div class="bootcard">
     <div class="kicker">TACTICAL TABLE · LIVESYNC</div>
-    <h1>Cortez</h1>
-    <p class="lede">A host-run battlemap. One GM opens doors, runs the hostiles, hands out turns and keeps the table in sync. Every player controls one character with hit points, inventory and a combat profile; hostiles react to attacks with the original melee AI.</p>
+    <h1>Marine Commander</h1>
+    <p class="lede">A host-run battlemap. One GM picks the deck, opens doors, runs the hostiles, hands out turns and keeps the table in sync. Every player controls one character with hit points, inventory and a combat profile; hostiles react to attacks with the original melee AI.</p>
 
     <label class="bootfield" for="playerName">Display name
       <input id="playerName" type="text" maxlength="24" autocomplete="nickname" placeholder="e.g. Vasquez">
@@ -47,7 +47,7 @@
 <div class="app" id="app" data-role="gm" hidden>
   <header class="bar">
     <div class="brand">
-      <h1>Cortez</h1>
+      <h1>Marine Commander</h1>
       <span id="mapinfo" class="mono muted">loading map…</span>
     </div>
     <div class="barctl">
@@ -55,6 +55,7 @@
       <span class="mono muted" id="turnInfo"></span>
       <button class="btn primary" id="endTurn" type="button" hidden>Next turn</button>
       <span class="conn" id="conn" hidden><span class="dot"></span><span id="connText">offline</span></span>
+      <select id="mapSelect" class="gm-only" aria-label="Map" title="Choose the map the table plays on"></select>
       <label class="btn gm-only" for="file" id="fileLabel">Load .dd2vtt</label>
       <input id="file" type="file" accept=".dd2vtt,.uvtt,.json" hidden>
       <input id="imgFile" type="file" accept="image/*" hidden>

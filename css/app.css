@@ -24,6 +24,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-body);
 .mono{font-family:var(--f-mono);font-size:12px}
 .muted{color:var(--muted)}
 .barctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#mapSelect{max-width:220px}
 
 .btn,.seg button,select,input[type=number],input[type=text]{font:inherit;color:var(--fg);background:var(--surface-2);
   border:1px solid var(--line);border-radius:6px;padding:6px 10px;min-height:32px}

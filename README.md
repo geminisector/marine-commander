@@ -1,10 +1,11 @@
 # Marine-Commander
 Combat based on the Gemini Sector engine
 
-A host-run battlemap for the Cortez deck plan. The GM opens doors, runs the
-hostiles, assigns turns, edits HP and inventory, and keeps the table in sync.
-Each player joins with a code, controls one character, moves and attacks on their
-turn, and has their own HP bar, inventory, combat stats and weapon.
+A host-run battlemap for the Cortez, Kamekh, Dorkir and Dorkathi deck plans. The
+GM picks the map, opens doors, runs the hostiles, assigns turns, edits HP and
+inventory, and keeps the table in sync. Each player joins with a code, controls
+one character, moves and attacks on their turn, and has their own HP bar,
+inventory, combat stats and weapon.
 
 The app is **static** — no build step, no server, no environment variables — so
 it can be deployed directly to Vercel (or any static host) and still play live.
@@ -69,15 +70,66 @@ window.MC_CONFIG = {
 
 1. Enter a display name and choose **Host a session**.
 2. Share the code or press **Copy invite**.
-3. Assign characters from the **Live session** roster (players are auto-seated
+3. Pick the deck from the **Map** selector in the header. Every player follows
+   the host's map choice; tokens stay on the deck where they were left.
+4. Assign characters from the **Live session** roster (players are auto-seated
    into a free player token when they join).
-4. Use **Turns** to give a token the turn, or **Next turn** to cycle through
+5. Use **Turns** to give a token the turn, or **Next turn** to cycle through
    everyone alive. Set a per-turn movement limit if you want one.
-5. Click a door to open/close it, click a bulb to cycle its light, drag tokens
+6. Click a door to open/close it, click a bulb to cycle its light, drag tokens
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
    the table log. Player door requests appear in the log.
-6. Keep the tab open — the host is the server. A refresh offers **Resume last
+7. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
+
+### Maps and decks
+
+The map picker lists the built-in scenes in `assets/maps/`. Each map is a UVTT
+scene file plus its PNG, so selecting a map is a small JSON fetch and never
+sends the image through the live session.
+
+Dorkathi is split into **Lower deck** and **Upper deck**, grouped together in
+the picker. The two decks are connected at the **Central ladder** marker near
+the middle of the ship:
+
+- The GM selects a token and clicks the ladder marker to send that token to the
+  other deck. With no token selected, the same click just switches decks.
+- A player whose token is standing on the marker can click it to travel. The
+  host validates the move and switches everyone to the destination deck.
+- A stair link is declared in `js/config.js` with `x`/`y` on the current map and
+  `to`/`tx`/`ty` for the destination. Both directions need an entry (one on each
+  map) to make the connection two-way:
+
+```js
+{
+  id: 'dorkathi_bottom',
+  name: 'Dorkathi', subtitle: 'Lower deck',
+  group: 'dorkathi', level: 'Lower deck',
+  scene: 'assets/maps/dorkathi_bottom.scene.json', ppg: 30,
+  stairs: [{
+    id: 'ladder-up', name: 'Central ladder · up',
+    x: 19.5, y: 20, to: 'dorkathi_top', tx: 19.5, ty: 20
+  }]
+}
+```
+
+To add another stair, give both maps an entry; the ids only need to be unique
+within a map. Coordinates are grid squares; `ppg` must match the scene's
+pixels-per-grid.
+
+To add a new `.dd2vtt` file, extract its image once and register the scene in
+`js/config.js` (the `.dd2vtt` keeps the image inline, which is too large to sync
+through MQTT on every snapshot):
+
+```python
+import base64, io, json
+from PIL import Image
+src = 'assets/maps/newmap.dd2vtt'
+d = json.load(open(src))
+Image.open(io.BytesIO(base64.b64decode(d['image']))).save('assets/maps/newmap.png')
+d['image'] = 'newmap.png'
+json.dump(d, open('assets/maps/newmap.scene.json', 'w'), separators=(',', ':'))
+```
 
 ### The Cortez boarding party
 
@@ -113,8 +165,10 @@ hostile**; it appears at the centre of the current view. Drag it to position it
 portrait. Placement is part of the table state: Solo GM autosaves to
 `localStorage`, a host writes a checkpoint after every change and offers
 **Resume**, and live players receive the host's layout. **Reset scene** restores
-the preset above; an existing solo save is restored when you re-enter, so use
-**Reset scene** (or clear the `cortez-solo-v4` key) to pick up a changed preset.
+the preset above and clears the table, including tokens on other decks; an
+existing solo save is restored when you re-enter, so use **Reset scene** (or
+clear the `cortez-solo-v4` key) to pick up a changed preset. Saves remember the
+selected map and door/light state for every deck in the map list.
 
 ### Player
 
@@ -161,12 +215,12 @@ Combat is a browser port of the supplied `melee.py` rules.
 ```
 index.html                 app shell and controls
 css/app.css                all presentation
-js/config.js               broker URLs, heartbeat/timeout, map path
+js/config.js               broker URLs, heartbeat/timeout, map catalog and stairs
 js/net.js                  MQTT transport, room crypto, presence
 js/app.js                  map renderer, rules, turn/roster/state UI
-assets/maps/cortez.scene.json   extracted UVTT geometry (image path, no base64)
-assets/maps/cortez.png          extracted map image
-assets/maps/cortez.dd2vtt       original source asset
+assets/maps/*.scene.json        extracted UVTT geometry for each deck (image path, no base64)
+assets/maps/*.png               extracted map images
+assets/maps/*.dd2vtt            original source maps
 vendor/mqtt.min.js              MQTT.js 5.10.1 browser bundle (MIT)
 marine_commander.html           original single-file version, kept for reference
 vtt/cortez.dd2vtt               original map file supplied with the project
@@ -181,8 +235,8 @@ loaded in **Solo GM** mode.
 
 - Live sessions require the GM's tab to stay open. If it closes, players see
   **GM offline** and the table pauses until the GM resumes/reopens.
-- Custom `.dd2vtt` maps are solo-only. The live session uses the built-in
-  Cortez scene so the map is shared consistently.
+- Custom `.dd2vtt` maps are solo-only. Live sessions use the built-in maps in
+  `js/config.js` so every client can load the same scene.
 - The session code is the access boundary. Anyone with it can join the lobby,
   and a malicious participant could spam actions (the host rate-limits them).
   Use a private broker if you need stronger isolation.

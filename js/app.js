@@ -11,7 +11,14 @@ const MAX_PLAYERS = CFG.maxPlayers || 8;
 const STORE_KEY = 'cortez-solo-v4';
 const HOST_SAVE_KEY = 'cortez-host-save-v4';
 const CLIENT_KEY = 'cortez-client-id';
-const APP_NAME = 'Cortez';
+const APP_NAME = 'Marine Commander';
+const FALLBACK_MAP = { id: 'cortez', name: 'Cortez', subtitle: 'Deck plan', scene: CFG.mapUrl || 'assets/maps/cortez.scene.json', ppg: 16 };
+const MAPS = (Array.isArray(CFG.maps) && CFG.maps.length ? CFG.maps : [FALLBACK_MAP])
+  .filter(m => m && typeof m.id === 'string' && m.id)
+  .map(m => Object.assign({ ppg: 16 }, m));
+const MAP_BY_ID = new Map(MAPS.map(m => [m.id, m]));
+const DEFAULT_MAP_ID = MAP_BY_ID.has(CFG.defaultMapId) ? CFG.defaultMapId : MAPS[0].id;
+const mapLabel = m => m ? (m.name + (m.subtitle ? ' · ' + m.subtitle : '')) : 'Map';
 // Built-in characters keep their names when a seat changes hands or is kicked.
 const FIXED_PLAYER_NAMES = new Set([
   "Leni 'Killmeister' Henari", "Keyan 'Enforcer' Steele",
@@ -31,8 +38,10 @@ const DEFAULT_OPEN = [0, 9, 14];
 const MIN_ROOM = 9;
 
 let map = null, tokens = [], nextId = 1;
+const mapStates = new Map();       // map id -> { doors: bool[], lights: force[] }
+let snapshotLoading = false, pendingSnapshot = null;
 let view = { x: 0, y: 0, k: 1 }, fitted = false;
-let tool = 'move', selected = null, hoverTok = null, hoverDoor = null;
+let tool = 'move', selected = null, hoverTok = null, hoverDoor = null, hoverStair = null;
 let ruler = null, ftPer = 5, unit = 'ft';
 const layers = { rooms: { vis: true, lock: false }, light: { vis: true, lock: false }, gm: { vis: true, lock: false }, player: { vis: true, lock: false } };
 const settings = { mode: 'auto', dark: 0.88, scale: 2.4, snap: true, peek: true, fog: true, explore: true, sight: 40, preview: false, gmPass: true, showStatus: false, showHp: true, turnBased: true, moveLimit: 0 };
@@ -101,6 +110,7 @@ function parseColor(c) {
 }
 function lum(hex) { const [r, g, b] = parseColor(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255; }
 const tokenById = id => tokens.find(t => t.id === id) || null;
+const onLevel = t => !!t && (!map || !t.mapKey || t.mapKey === map.key);
 const isHost = () => sessionRole !== 'player';
 const isLive = () => sessionRole === 'host' || sessionRole === 'player';
 const hasHp = t => t.maxHp > 0;
@@ -204,8 +214,9 @@ function cleanToken(t) {
   let hp = Number.isFinite(+t.hp) ? Math.round(+t.hp) : maxHp;
   if (!t.stats && !(+t.maxHp > 0)) hp = maxHp;
   hp = Math.max(0, Math.min(maxHp, hp));
+  const mapKey = typeof t.mapKey === 'string' && t.mapKey ? t.mapKey : (map ? map.key : DEFAULT_MAP_ID);
   return {
-    id: +t.id, layer, name: String(t.name || 'Token').slice(0, 40),
+    id: +t.id, layer, mapKey, name: String(t.name || 'Token').slice(0, 40),
     color: /^#[0-9a-f]{6}$/i.test(t.color || '') ? t.color : '#3cc4b1',
     size, x: +t.x || 0, y: +t.y || 0,
     hp, maxHp,
@@ -224,44 +235,91 @@ function imageSource(d, base) {
   }
   return 'data:image/png;base64,' + d.image;
 }
-function loadMap(d, key, base) {
+function loadMap(d, key, base, meta) {
   return new Promise((resolve, reject) => {
     if (!d || !d.resolution || !d.image) return reject(new Error('This file is not a Universal VTT map (missing resolution or image).'));
     const img = new Image();
-    img.onload = () => { try { build(d, img, key); resolve(); } catch (e) { reject(e); } };
+    img.onload = () => { try { build(d, img, key, meta); resolve(); } catch (e) { reject(e); } };
     img.onerror = () => reject(new Error('The map image could not be decoded.'));
     img.src = imageSource(d, base);
   });
 }
-async function loadBuiltin() {
-  const url = CFG.mapUrl || 'assets/maps/cortez.scene.json';
-  const res = await fetch(url, { cache: 'force-cache' });
-  if (!res.ok) throw new Error('Could not load the Cortez map (' + res.status + ').');
+function cacheCurrentMapState() {
+  if (!map) return;
+  mapStates.set(map.key, {
+    doors: map.doors.map(d => !!d.open),
+    lights: map.lights.map(l => l.force)
+  });
+}
+function applyMapStateToCurrent() {
+  if (!map) return;
+  const st = mapStates.get(map.key);
+  if (!st) { cacheCurrentMapState(); return; }
+  (st.doors || []).forEach((o, i) => { if (map.doors[i]) map.doors[i].open = !!o; });
+  (st.lights || []).forEach((f, i) => { if (map.lights[i]) map.lights[i].force = f; });
+}
+function allMapStates() {
+  cacheCurrentMapState();
+  const out = {};
+  for (const [id, st] of mapStates) if (MAP_BY_ID.has(id)) out[id] = st;
+  return out;
+}
+function restoreMapStates(raw) {
+  if (!raw || typeof raw !== 'object') return;
+  for (const [id, st] of Object.entries(raw)) {
+    if (!MAP_BY_ID.has(id) || !st || typeof st !== 'object') continue;
+    mapStates.set(id, {
+      doors: Array.isArray(st.doors) ? st.doors.map(Boolean) : [],
+      lights: Array.isArray(st.lights) ? st.lights.slice() : []
+    });
+  }
+  applyMapStateToCurrent();
+}
+async function loadMapById(id) {
+  const meta = MAP_BY_ID.get(id);
+  if (!meta) throw new Error('Unknown map "' + id + '".');
+  if (map && map.key === id) return map;
+  const url = meta.scene || (id === 'cortez' ? CFG.mapUrl : '');
+  if (!url) throw new Error('No scene file is configured for ' + mapLabel(meta) + '.');
+  const abs = new URL(url, location.href).href;
+  const res = await fetch(abs, { cache: 'force-cache' });
+  if (!res.ok) throw new Error('Could not load ' + mapLabel(meta) + ' (' + res.status + ').');
   const d = await res.json();
-  await loadMap(d, 'cortez', new URL(url, location.href).href);
+  cacheCurrentMapState();
+  await loadMap(d, id, abs, meta);
+  return map;
+}
+async function loadDefaultMap() {
+  const id = MAP_BY_ID.has(map && map.key) ? map.key : DEFAULT_MAP_ID;
+  await loadMapById(id);
 }
 
-function build(d, img, key) {
-  const ppg = d.resolution.pixels_per_grid || 50;
+function build(d, img, key, meta) {
+  const ppg = d.resolution.pixels_per_grid || (meta && meta.ppg) || 50;
   const P = p => ({ x: p.x * ppg, y: p.y * ppg });
   const walls = [];
   for (const poly of [...(d.line_of_sight || []), ...(d.objects_line_of_sight || [])])
     for (let i = 0; i < poly.length - 1; i++) { const a = P(poly[i]), b = P(poly[i + 1]); walls.push([a.x, a.y, b.x, b.y]); }
   const doors = (d.portals || []).map((p, i) => ({ a: P(p.bounds[0]), b: P(p.bounds[1]), open: !p.closed, name: (key === 'cortez' && DOOR_NAMES[i]) || ('Door ' + (i + 1)), regs: [] }));
   const lights = (d.lights || []).map(l => ({ x: l.position.x * ppg, y: l.position.y * ppg, r: l.range * ppg, rgb: parseColor(l.color), force: null, region: 0, on: false }));
-  map = { img, W: img.naturalWidth, H: img.naturalHeight, ppg, walls, doors, lights, blockers: [], key, name: key === 'cortez' ? 'Cortez deck plan' : 'Loaded map' };
+  const stairs = ((meta && meta.stairs) || []).map(s => Object.assign({}, s, {
+    gx: +s.x, gy: +s.y, x: (+s.x) * ppg, y: (+s.y) * ppg
+  }));
+  map = {
+    img, W: img.naturalWidth, H: img.naturalHeight, ppg, walls, doors, lights, stairs, blockers: [],
+    key, name: meta ? mapLabel(meta) : (key === 'cortez' ? 'Cortez · Deck plan' : 'Loaded map'),
+    group: meta && meta.group || '', level: meta && meta.level || ''
+  };
   dark.width = tint.width = fog.width = expl.width = map.W;
   dark.height = tint.height = fog.height = expl.height = map.H;
   eg.clearRect(0, 0, map.W, map.H);
-  imgs.clear(); openStats.clear(); anim = null; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; selected = null; ruler = null;
-  tokens = []; nextId = 1;
-  if (key === 'cortez') {
-    doors.forEach((dr, i) => { dr.open = DEFAULT_OPEN.includes(i); });
-    tokens = defaultTokens();
-  }
+  imgs.clear(); openStats.clear(); selected = null; ruler = null;
+  if (!mapStates.has(key) && key === 'cortez') doors.forEach((dr, i) => { dr.open = DEFAULT_OPEN.includes(i); });
+  applyMapStateToCurrent();
   computeRegions();
   rebuildBlockers();
   $('#mapinfo').textContent = `${map.name} · ${Math.round(map.W / ppg)}×${Math.round(map.H / ppg)} squares · ${doors.length} doors · ${lights.length} lights`;
+  syncMapSelect();
   syncTokenImages();
   renderAll(); updateDoorCount(); lightDirty = true; fogDirty = true;
   requestAnimationFrame(() => { fitView(); invalidate(); });
@@ -269,8 +327,10 @@ function build(d, img, key) {
 
 function resetToDefaults() {
   if (!map) return;
+  mapStates.clear();
   map.doors.forEach((d, i) => { d.open = map.key === 'cortez' ? DEFAULT_OPEN.includes(i) : false; });
   map.lights.forEach(l => { l.force = null; });
+  cacheCurrentMapState();
   nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; anim = null;
   imgs.clear();
   tokens = map.key === 'cortez' ? defaultTokens() : [];
@@ -278,6 +338,61 @@ function resetToDefaults() {
   roster = []; logRows = []; selected = null; ruler = null;
   clearExplored(); rebuildBlockers(); lightDirty = true; fogDirty = true;
   updateDoorCount(); renderAll(); invalidate();
+}
+
+async function loadCustomMap(d) {
+  cacheCurrentMapState();
+  await loadMap(d, 'custom', location.href, { name: 'Custom map' });
+  mapStates.clear();
+  tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} };
+  roster = []; logRows = []; selected = null; ruler = null;
+  clearExplored(); cacheCurrentMapState();
+  logEvent('Custom map loaded. It is local to this solo session.');
+  renderAll(); invalidate();
+}
+
+function populateMapSelect() {
+  const sel = $('#mapSelect');
+  if (!sel || sel.dataset.ready) return;
+  sel.textContent = '';
+  let group = null, groupEl = null;
+  for (const m of MAPS) {
+    if (m.group) {
+      if (!groupEl || group !== m.group) {
+        group = m.group;
+        groupEl = document.createElement('optgroup');
+        groupEl.label = m.name;
+        sel.append(groupEl);
+      }
+    } else groupEl = null;
+    const o = document.createElement('option');
+    o.value = m.id;
+    o.textContent = m.subtitle ? m.name + ' · ' + m.subtitle : m.name;
+    (groupEl || sel).append(o);
+  }
+  sel.dataset.ready = '1';
+}
+function syncMapSelect() {
+  populateMapSelect();
+  const sel = $('#mapSelect');
+  if (sel && map) sel.value = map.key;
+}
+async function selectMap(id, opts = {}) {
+  if (!MAP_BY_ID.has(id)) { showMsg('That map is not in the map list.'); syncMapSelect(); return; }
+  if (map && map.key === id) { syncMapSelect(); return; }
+  const sel = $('#mapSelect');
+  if (sel) sel.disabled = true;
+  try {
+    await loadMapById(id);
+    if (selected != null && !onLevel(tokenById(selected))) selected = null;
+    if (!opts.silent) logEvent(`GM switches the table to ${map.name}.`);
+    changed();
+  } catch (err) {
+    showMsg(err.message || 'Could not load that map.');
+    syncMapSelect();
+  } finally {
+    if (sel) sel.disabled = false;
+  }
 }
 
 /* ---------- rooms: label enclosed regions with every door treated as closed ---------- */
@@ -400,7 +515,7 @@ function defaultTokens() {
     const bag = inv || (layer === 'gm'
       ? [{ name: 'Frag grenade', qty: 1 }]
       : [{ name: 'Medkit', qty: 1 }, { name: 'Ammo', qty: 2 }]);
-    const t = { id: nextId++, layer, name, color, size, x, y, status: '', hp: maxHp, maxHp, stats: st, weapon, inventory: bag, img };
+    const t = { id: nextId++, layer, mapKey: map ? map.key : DEFAULT_MAP_ID, name, color, size, x, y, status: '', hp: maxHp, maxHp, stats: st, weapon, inventory: bag, img };
     snapTok(t); return t;
   };
   // Pixel centre of a map square (the scene is 64 x 39.25 squares at 16 px each).
@@ -459,10 +574,10 @@ function canTouch(t) {
 }
 const fogActive = () => settings.fog && (role === 'player' || settings.preview);
 function visionTokens() {
-  const alive = tokens.filter(t => t.layer === 'player' && !isDown(t));
+  const alive = tokens.filter(t => t.layer === 'player' && !isDown(t) && onLevel(t));
   if (role === 'player' && me.tokenId) {
     const mine = tokenById(me.tokenId);
-    return mine && !isDown(mine) ? [mine] : [];
+    return mine && !isDown(mine) && onLevel(mine) ? [mine] : [];
   }
   return alive;
 }
@@ -535,7 +650,7 @@ function snapSafe(t) {
   fogDirty = true;
 }
 function hitToken(w) {
-  const order = [...tokens.filter(t => t.layer === 'player'), ...tokens.filter(t => t.layer === 'gm')].reverse();
+  const order = [...tokens.filter(t => t.layer === 'player' && onLevel(t)), ...tokens.filter(t => t.layer === 'gm' && onLevel(t))].reverse();
   for (const t of order) if (tokVisible(t) && Math.hypot(w.x - t.x, w.y - t.y) <= tokRadius(t) + 2 / view.k) return t;
   return null;
 }
@@ -554,6 +669,60 @@ function hitBulb(w) {
   for (const l of map.lights) { const dd = Math.hypot(w.x - l.x, w.y - l.y); if (dd < bd) { bd = dd; best = l; } }
   return best;
 }
+function hitStair(w) {
+  if (!map || !map.stairs) return null;
+  return map.stairs.find(s => Math.hypot(w.x - s.x, w.y - s.y) <= map.ppg * 0.7) || null;
+}
+function stairsFor(mapKey) {
+  const meta = MAP_BY_ID.get(mapKey);
+  return (meta && Array.isArray(meta.stairs)) ? meta.stairs : [];
+}
+function moveTokenThroughStair(t, st) {
+  const from = t.mapKey || (map ? map.key : '');
+  if (!st || st.to === from) return false;
+  const srcPpg = (MAP_BY_ID.get(from) || {}).ppg || (map ? map.ppg : 50);
+  const gx = st.gx != null ? st.gx : +st.x, gy = st.gy != null ? st.gy : +st.y;
+  if (Math.hypot(t.x / srcPpg - gx, t.y / srcPpg - gy) > 1.6) return false;
+  const dstMeta = MAP_BY_ID.get(st.to);
+  if (!dstMeta) return false;
+  const dstPpg = dstMeta.ppg || srcPpg;
+  t.mapKey = st.to;
+  t.x = (+st.tx) * dstPpg;
+  t.y = (+st.ty) * dstPpg;
+  if (settings.snap) {
+    const tmp = { size: t.size, x: t.x, y: t.y };
+    const g = dstPpg;
+    if (t.size % 2 === 1) { tmp.x = (Math.floor(tmp.x / g) + .5) * g; tmp.y = (Math.floor(tmp.y / g) + .5) * g; }
+    else { tmp.x = Math.round(tmp.x / g) * g; tmp.y = Math.round(tmp.y / g) * g; }
+    t.x = tmp.x; t.y = tmp.y;
+  }
+  return true;
+}
+async function useStair(t, st) {
+  if (!t || !st) return;
+  const from = t.mapKey || (map ? map.key : '');
+  if (!moveTokenThroughStair(t, st)) { showMsg('Move the token onto the stair marker first.'); return; }
+  const dest = MAP_BY_ID.get(st.to);
+  logEvent(`${t.name} takes ${st.name} to ${mapLabel(dest)}.`);
+  fogDirty = true;
+  if (map && map.key === from) await selectMap(st.to, { silent: true });
+  selected = t.id;
+  changed();
+}
+function clickStair(st) {
+  if (!st) return;
+  if (role === 'gm') {
+    const t = tokenById(selected);
+    if (t && onLevel(t)) useStair(t, st);
+    else selectMap(st.to, { silent: true });
+    return;
+  }
+  const own = tokenById(me.tokenId);
+  if (!own || !onLevel(own)) { showMsg('You need a character on this deck to use the stair.'); return; }
+  if (!hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+  net && net.sendAction({ type: 'useStair', tokenId: own.id, stairId: st.id }).catch(() => showMsg('Could not send the stair move.'));
+  showMsg('Using ' + st.name + '…');
+}
 
 /* ---------- shared state ---------- */
 const SHARED_SETTINGS = ['mode', 'dark', 'scale', 'snap', 'fog', 'explore', 'sight', 'preview', 'gmPass', 'showStatus', 'showHp', 'turnBased', 'moveLimit'];
@@ -561,11 +730,12 @@ function sharedSettings() { const o = {}; for (const k of SHARED_SETTINGS) o[k] 
 function makeSnapshot() {
   rev++;
   return {
-    v: 2, rev, ts: Date.now(), host: hostName || me.name || 'GM', mapKey: map ? map.key : 'cortez',
+    v: 2, rev, ts: Date.now(), host: hostName || me.name || 'GM', mapKey: map ? map.key : DEFAULT_MAP_ID,
     turn: { number: turn.number, activeId: turn.activeId, moved: Object.assign({}, turn.moved), attacked: Object.assign({}, turn.attacked) },
     tokens: tokens.map(cleanToken),
     doors: map ? map.doors.map(d => d.open) : [],
     lights: map ? map.lights.map(l => l.force) : [],
+    mapStates: allMapStates(),
     settings: sharedSettings(), ftPer, unit,
     roster: roster.map(r => ({ clientId: r.clientId, name: r.name, tokenId: r.tokenId, online: r.online, joinedAt: r.joinedAt })),
     log: logRows.slice(-70)
@@ -591,11 +761,25 @@ function touch() {
   else if (sessionRole === 'solo') scheduleSave();
   invalidate();
 }
+function snapshotMapKey(s) {
+  return MAP_BY_ID.has(s.mapKey) ? s.mapKey : (map ? map.key : DEFAULT_MAP_ID);
+}
 function applySnapshot(s, initial = false) {
   if (!s || s.v !== 2) return;
   if (!initial && s.rev <= rev) return;
-  if (s.mapKey && map && s.mapKey !== map.key) {
-    showMsg('This session uses a different map (' + s.mapKey + '). Ask the GM to load the default deck.');
+  const wanted = snapshotMapKey(s);
+  if (wanted && (!map || wanted !== map.key)) {
+    if (snapshotLoading) { pendingSnapshot = { s, initial }; return; }
+    snapshotLoading = true;
+    pendingSnapshot = { s, initial };
+    loadMapById(wanted).then(() => {
+      snapshotLoading = false;
+      const next = pendingSnapshot; pendingSnapshot = null;
+      if (next) applySnapshot(next.s, next.initial);
+    }).catch(err => {
+      snapshotLoading = false;
+      showMsg(err.message || 'Could not load the selected map.');
+    });
     return;
   }
   rev = s.rev;
@@ -603,9 +787,11 @@ function applySnapshot(s, initial = false) {
   tokens = (s.tokens || []).map(t => Object.assign(cleanToken(t), { plan: undefined }));
   nextId = Math.max(0, ...tokens.map(t => t.id)) + 1;
   syncTokenImages();
+  if (s.mapStates) restoreMapStates(s.mapStates);
   if (map) {
     (s.doors || []).forEach((o, i) => { if (map.doors[i]) map.doors[i].open = !!o; });
     (s.lights || []).forEach((f, i) => { if (map.lights[i]) map.lights[i].force = f; });
+    cacheCurrentMapState();
     rebuildBlockers();
   }
   Object.assign(settings, s.settings || {});
@@ -688,7 +874,8 @@ function draw() {
 
   if (settings.fog && fogDirty) fogPass();
   if (fogActive()) { ctx.globalAlpha = role === 'gm' ? 0.72 : 1; ctx.drawImage(fog, 0, 0); ctx.globalAlpha = 1; }
-  for (const layer of ['gm', 'player']) for (const t of tokens) if (t.layer === layer && tokVisible(t)) drawToken(t);
+  for (const s of map.stairs || []) drawStair(s);
+  for (const layer of ['gm', 'player']) for (const t of tokens) if (t.layer === layer && onLevel(t) && tokVisible(t)) drawToken(t);
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawRuler();
@@ -757,6 +944,27 @@ function drawToken(t) {
   }
 }
 
+function drawStair(s) {
+  const k = view.k, r = Math.max(7 / k, map.ppg * 0.3);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, 6.2832);
+  ctx.fillStyle = 'rgba(18,25,35,.88)'; ctx.fill();
+  ctx.lineWidth = Math.max(1.5, (s === hoverStair ? 4 : 2.5) / k);
+  ctx.strokeStyle = css('--accent'); ctx.setLineDash([4 / k, 3 / k]); ctx.stroke(); ctx.setLineDash([]);
+  const arrow = s.to.includes('top') ? '↑' : s.to.includes('bottom') ? '↓' : '↕';
+  ctx.font = `600 ${Math.max(12 / k, r * 0.95)}px Inter,sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = css('--accent'); ctx.fillText(arrow, s.x, s.y + r * 0.04);
+  const fs = Math.max(10 / k, 4);
+  const label = s.name.replace(/\s*·\s*/, ' ');
+  ctx.font = `500 ${fs}px Inter,sans-serif`;
+  const tw = ctx.measureText(label).width, pad = fs * 0.45, bh = fs * 1.5;
+  const bx = s.x - tw / 2 - pad, by = s.y + r + 3 / k;
+  ctx.fillStyle = 'rgba(11,15,21,.9)'; ctx.fillRect(bx, by, tw + pad * 2, bh);
+  ctx.fillStyle = '#fff'; ctx.fillText(label, s.x, by + bh / 2);
+  ctx.restore();
+}
+
 function drawRuler() {
   if (!ruler || !map) return;
   const a = toScreen(ruler.a), b = toScreen(ruler.b);
@@ -813,6 +1021,8 @@ cv.addEventListener('pointerdown', e => {
     drag = { type: 'token', t, dx: t.x - w.x, dy: t.y - w.y, sx: t.x, sy: t.y, moved: false };
     invalidate(); return;
   }
+  const st = hitStair(w);
+  if (st) { clickStair(st); return; }
   if (role === 'gm') {
     if (layers.light.vis) { const bl = hitBulb(w); if (bl) { bl.force = bl.force === null ? true : (bl.force === true ? false : null); lightDirty = true; logEvent(`GM turns a light ${bl.force === null ? 'to automatic' : bl.force ? 'on' : 'off'}.`); changed(); return; } }
     if (layers.rooms.vis && !layers.rooms.lock) {
@@ -843,11 +1053,12 @@ cv.addEventListener('pointermove', e => {
   const ht = hitToken(w);
   const hd = (layers.rooms.vis && !layers.rooms.lock) ? hitDoor(w) : null;
   const hb = (role === 'gm' && layers.light.vis) ? hitBulb(w) : null;
-  if (ht !== hoverTok || hd !== hoverDoor) { hoverTok = ht; hoverDoor = ht ? null : hd; invalidate(); }
-  cv.style.cursor = tool === 'ruler' ? 'crosshair' : (ht && canTouch(ht)) ? 'grab' : (hd || hb) ? 'pointer' : 'default';
+  const hs = hitStair(w);
+  if (ht !== hoverTok || hd !== hoverDoor || hs !== hoverStair) { hoverTok = ht; hoverDoor = ht ? null : hd; hoverStair = ht ? null : hs; invalidate(); }
+  cv.style.cursor = tool === 'ruler' ? 'crosshair' : (ht && canTouch(ht)) ? 'grab' : (hd || hb || hs) ? 'pointer' : 'default';
   const own = ht && (isHost() || ht.id === me.tokenId);
   const turnMsg = ht && role === 'player' && settings.turnBased && turn.activeId !== ht.id ? ' · waiting for their turn' : '';
-  setHint(hd && !ht ? (role === 'gm' ? `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ${hd.open ? 'close' : 'open'}` : `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ask the GM`) : hb && !ht ? `Light · ${hb.force === null ? 'automatic' : hb.force ? 'forced on' : 'forced off'} · click to cycle` : ht && own ? `${ht.name} · HP ${ht.hp}/${ht.maxHp}${turnMsg}` : null);
+  setHint(hs && !ht ? `${hs.name} · click to travel to ${mapLabel(MAP_BY_ID.get(hs.to))}` : hd && !ht ? (role === 'gm' ? `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ${hd.open ? 'close' : 'open'}` : `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ask the GM`) : hb && !ht ? `Light · ${hb.force === null ? 'automatic' : hb.force ? 'forced on' : 'forced off'} · click to cycle` : ht && own ? `${ht.name} · HP ${ht.hp}/${ht.maxHp}${turnMsg}` : null);
 });
 function endPointer(e) {
   pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null;
@@ -885,7 +1096,7 @@ stage.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransf
 function readFile(f) {
   if (sessionRole !== 'solo') { showMsg('Custom maps can only be loaded in Solo GM mode.'); return; }
   const fr = new FileReader();
-  fr.onload = () => { try { loadMap(JSON.parse(fr.result), 'custom').catch(err => showMsg(err.message)); } catch (err) { showMsg('Could not read that file as JSON.'); } };
+  fr.onload = () => { try { loadCustomMap(JSON.parse(fr.result)).catch(err => showMsg(err.message)); } catch (err) { showMsg('Could not read that file as JSON.'); } };
   fr.readAsText(f);
 }
 $('#file').addEventListener('change', e => { const f = e.target.files[0]; if (f) readFile(f); e.target.value = ''; });
@@ -908,6 +1119,7 @@ $('#toolMove').onclick = () => setTool('move'); $('#toolRuler').onclick = () => 
 $('#zIn').onclick = () => zoomAt(1.25, cv.clientWidth / 2, cv.clientHeight / 2);
 $('#zOut').onclick = () => zoomAt(0.8, cv.clientWidth / 2, cv.clientHeight / 2);
 $('#btnFit').onclick = fitView;
+$('#mapSelect').onchange = e => selectMap(e.target.value);
 
 /* ---------- panel wiring ---------- */
 $$('.lrow[data-layer]').forEach(row => {
@@ -976,7 +1188,7 @@ function renderTokens() {
   for (const [layer, id] of [['player', '#rowsPlayer'], ['gm', '#rowsGm']]) {
     const box = $(id); if (!box) continue;
     box.textContent = '';
-    const list = tokens.filter(t => t.layer === layer && (role === 'gm' || tokVisible(t)));
+    const list = tokens.filter(t => t.layer === layer && onLevel(t) && (role === 'gm' || tokVisible(t)));
     if (layer === 'player') $('#plCount').textContent = tokens.filter(t => t.layer === 'player').length + '/' + MAX_PLAYERS;
     if (!list.length) {
       const p = document.createElement('div'); p.className = 'empty';
@@ -1056,7 +1268,7 @@ function tokenRow(t) {
 function badge(text, cls) { const b = document.createElement('span'); b.className = 'badge ' + cls; b.textContent = text; return b; }
 
 function combatTargets(t) {
-  return tokens.filter(o => o.id !== t.id && !isDown(o) &&
+  return tokens.filter(o => o.id !== t.id && !isDown(o) && onLevel(o) &&
     (role === 'gm' || (o.layer === 'gm' && tokVisible(o))));
 }
 function attackBlockedReason(t) {
@@ -1460,7 +1672,7 @@ function addToken(layer) {
   const name = $('#newName').value.trim() || (layer === 'gm' ? 'Hostile ' : 'Player ') + n;
   const stats = normalizeStats(null, layer, size);
   const derived = computeStats(stats);
-  const t = { id: nextId++, layer, status: '', hp: derived.maxHp, maxHp: derived.maxHp, stats, weapon: '', name, color: $('#newColor').value, size, inventory: [], img: '', x: (r.width / 2 - view.x) / view.k, y: (r.height / 2 - view.y) / view.k };
+  const t = { id: nextId++, layer, mapKey: map.key, status: '', hp: derived.maxHp, maxHp: derived.maxHp, stats, weapon: '', name, color: $('#newColor').value, size, inventory: [], img: '', x: (r.width / 2 - view.x) / view.k, y: (r.height / 2 - view.y) / view.k };
   snapTok(t); tokens.push(t); selected = t.id; $('#newName').value = ''; changed();
 }
 $('#addPlayer').onclick = () => addToken('player'); $('#addGm').onclick = () => addToken('gm');
@@ -1484,8 +1696,15 @@ function renderSheet() {
   head.append(sw, nm);
   if (settings.turnBased && turn.activeId === t.id) head.append(badge('YOUR TURN', 'turn'));
   body.append(head);
-  const status = document.createElement('div'); status.className = 'sub'; status.textContent = 'HP ' + t.hp + ' / ' + t.maxHp + (t.status ? ' · ' + t.status : '');
+  const offLevel = t.mapKey && map && t.mapKey !== map.key;
+  const status = document.createElement('div'); status.className = 'sub';
+  status.textContent = 'HP ' + t.hp + ' / ' + t.maxHp + (t.status ? ' · ' + t.status : '') + (offLevel ? ' · on ' + mapLabel(MAP_BY_ID.get(t.mapKey)) : '');
   body.append(status);
+  if (offLevel) {
+    const note = document.createElement('div'); note.className = 'sub';
+    note.textContent = 'The GM is viewing ' + map.name + '. Your character is on another deck.';
+    body.append(note);
+  }
   body.append(hpBlock(t, true, false));
   body.append(combatRow(t));
   body.append(statsBlock(t, false));
@@ -1556,7 +1775,7 @@ function autoSeat(member) {
   if (!t && tokens.filter(x => x.layer === 'player').length < MAX_PLAYERS) {
     const n = tokens.filter(x => x.layer === 'player').length;
     const st = normalizeStats(null, 'player', 1), der = computeStats(st);
-    t = { id: nextId++, layer: 'player', status: '', hp: der.maxHp, maxHp: der.maxHp, stats: st, weapon: 'knife', name: member.name, color: ['#3cc4b1', '#6aa6ff', '#f2a93b', '#c58bff', '#58d68a', '#ff8fa3'][n % 6], size: 1, inventory: [{ name: 'Medkit', qty: 1 }], img: '', x: 552 + (n % 2) * 34, y: 300 + Math.floor(n / 2) * 22 };
+    t = { id: nextId++, layer: 'player', mapKey: map ? map.key : DEFAULT_MAP_ID, status: '', hp: der.maxHp, maxHp: der.maxHp, stats: st, weapon: 'knife', name: member.name, color: ['#3cc4b1', '#6aa6ff', '#f2a93b', '#c58bff', '#58d68a', '#ff8fa3'][n % 6], size: 1, inventory: [{ name: 'Medkit', qty: 1 }], img: '', x: (map ? map.W / 2 : 552) + (n % 2) * 34, y: (map ? map.H / 2 : 300) + Math.floor(n / 2) * 22 };
     snapTok(t); tokens.push(t); loadTokImg(t);
   }
   if (t) {
@@ -1590,7 +1809,8 @@ function renderTurnOrder() {
     const nm = document.createElement('span'); nm.className = 'tname'; nm.textContent = t.name;
     const meta = document.createElement('span'); meta.className = 'mono muted';
     const moved = turn.moved[t.id] || 0;
-    meta.textContent = (t.layer === 'gm' ? 'hostile' : 'player') + (turn.activeId === t.id && settings.moveLimit > 0 ? ` · ${fmt(moved)}/${fmt(settings.moveLimit)} sq` : '') + (settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · attacked' : '');
+    const offLevel = map && t.mapKey && t.mapKey !== map.key;
+    meta.textContent = (t.layer === 'gm' ? 'hostile' : 'player') + (offLevel ? ` · ${mapLabel(MAP_BY_ID.get(t.mapKey))}` : '') + (turn.activeId === t.id && settings.moveLimit > 0 ? ` · ${fmt(moved)}/${fmt(settings.moveLimit)} sq` : '') + (settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · attacked' : '');
     const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny' + (turn.activeId === t.id ? ' primary' : '');
     b.textContent = turn.activeId === t.id ? 'Active' : 'Give turn'; b.disabled = isDown(t);
     b.onclick = () => assignTurn(t.id);
@@ -1602,6 +1822,7 @@ function assignTurn(tokenId) {
   const t = tokenById(tokenId); if (!t) return;
   turn.number++; turn.activeId = tokenId; turn.moved = {}; turn.attacked = {}; selected = tokenId;
   logEvent(`Turn ${turn.number}: ${t.name}.`);
+  if (t.mapKey && map && t.mapKey !== map.key) selectMap(t.mapKey, { silent: true });
   changed();
 }
 function nextTurn(dir) {
@@ -1613,6 +1834,7 @@ function nextTurn(dir) {
   const next = alive[(idx + dir + alive.length) % alive.length];
   turn.number++; turn.activeId = next.id; turn.moved = {}; turn.attacked = {}; selected = next.id;
   logEvent(`Turn ${turn.number}: ${next.name}.`);
+  if (next.mapKey && map && next.mapKey !== map.key) selectMap(next.mapKey, { silent: true });
   changed();
 }
 
@@ -1698,7 +1920,7 @@ function rateAllowed(clientId) {
   r.n++; rate.set(clientId, r);
   return r.n <= 30;
 }
-function handleAction(msg) {
+async function handleAction(msg) {
   if (sessionRole !== 'host' || !msg || !msg.action) return;
   const action = msg.action, clientId = String(msg.clientId || '');
   if (!clientId || !rateAllowed(clientId)) return;
@@ -1754,6 +1976,19 @@ function handleAction(msg) {
     case 'chat': {
       const text = String(action.text || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200);
       if (text) { logEvent(`${member.name}: ${text}`, 'chat'); changed(); }
+      return;
+    }
+    case 'useStair': {
+      if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use a stair with your own character.'); return; }
+      if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
+      const from = own.mapKey || map.key;
+      const st = stairsFor(from).find(s => s.id === action.stairId);
+      if (!st) { net.notify(clientId, 'That stair is not connected.'); scheduleSync(); return; }
+      if (!moveTokenThroughStair(own, st)) { net.notify(clientId, 'Move onto the stair marker first.'); scheduleSync(); return; }
+      logEvent(`${own.name} takes ${st.name} to ${mapLabel(MAP_BY_ID.get(st.to))}.`);
+      net.notify(clientId, 'You arrive on ' + mapLabel(MAP_BY_ID.get(st.to)) + '.');
+      if (map && map.key === from) await selectMap(st.to, { silent: true });
+      else changed();
       return;
     }
     case 'move': {
@@ -1842,7 +2077,7 @@ setInterval(() => {
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    if (sessionRole === 'solo' && map && map.key === 'cortez') saveSolo();
+    if (sessionRole === 'solo' && map && MAP_BY_ID.has(map.key)) saveSolo();
     else if (sessionRole === 'host') saveHostCheckpoint();
   }, 450);
 }
@@ -1850,20 +2085,21 @@ function saveSolo() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(makeSnapshot())); } catch (e) { showMsg('Could not save in this browser (storage full). Smaller token images help.'); }
 }
 function saveHostCheckpoint() {
-  if (sessionRole !== 'host' || !map || map.key !== 'cortez') return;
+  if (sessionRole !== 'host' || !map || !MAP_BY_ID.has(map.key)) return;
   try { localStorage.setItem(HOST_SAVE_KEY, JSON.stringify({ room: roomCode, name: me.name, snapshot: makeSnapshot(), ts: Date.now() })); } catch (e) {}
 }
 function readSaved(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
-function loadSoloSave() {
+async function loadSoloSave() {
   const s = readSaved(STORE_KEY);
-  if (!s || s.mapKey !== 'cortez' || !Array.isArray(s.tokens)) return false;
+  if (!s || !MAP_BY_ID.has(s.mapKey) || !Array.isArray(s.tokens)) return false;
+  if (!map || map.key !== s.mapKey) await loadMapById(s.mapKey);
   applySnapshot(s, true);
   if (s.settings && Array.isArray(s.roster)) { /* applied */ }
   return true;
 }
 function loadHostCheckpoint() {
   const s = readSaved(HOST_SAVE_KEY);
-  if (!s || !s.room || !s.snapshot || s.snapshot.mapKey !== 'cortez' || !normalizeRoom(s.room)) return null;
+  if (!s || !s.room || !s.snapshot || !MAP_BY_ID.has(s.snapshot.mapKey) || !normalizeRoom(s.room)) return null;
   return s;
 }
 
@@ -1921,8 +2157,9 @@ function pickName() {
 }
 async function ensureMap() {
   if (map) return;
-  bootStatus('Loading the Cortez deck plan…');
-  await loadBuiltin();
+  const meta = MAP_BY_ID.get(DEFAULT_MAP_ID);
+  bootStatus('Loading ' + mapLabel(meta) + '…');
+  await loadDefaultMap();
 }
 
 async function startHost(resume) {
@@ -1936,6 +2173,7 @@ async function startHost(resume) {
     sessionRole = 'host'; role = 'gm'; me.name = name; hostName = name; netState = 'live';
     roomCode = resume ? normalizeRoom(resume.room) : makeRoomCode();
     if (resume) {
+      if (resume.snapshot.mapKey && (!map || resume.snapshot.mapKey !== map.key)) await loadMapById(resume.snapshot.mapKey);
       applySnapshot(resume.snapshot, true);
       roster = (resume.snapshot.roster || []).map(r => Object.assign({}, r, { online: false, lastSeen: 0 }));
       logRows = Array.isArray(resume.snapshot.log) ? resume.snapshot.log.slice(-70) : [];
@@ -2001,7 +2239,7 @@ async function startSolo() {
     await ensureMap();
     resetToDefaults(); rev = 0;
     sessionRole = 'solo'; role = 'gm'; me.name = name; hostName = name; roomCode = '';
-    const restored = loadSoloSave();
+    const restored = await loadSoloSave();
     if (!restored) logEvent('Solo session started. You are the GM.');
     history.replaceState(null, '', location.pathname + location.search);
     enterGame();
@@ -2045,13 +2283,15 @@ if (hashRoom && !location.hash.startsWith('#host=')) {
 checkResumeAvailability();
 setHint(null);
 
-const bootMapPromise = loadBuiltin().catch(err => {
+populateMapSelect();
+const bootMapPromise = loadDefaultMap().catch(err => {
   bootStatus(err.message || 'Could not load the map.', 'err');
 });
 window.__cortez = {
   get map() { return map; }, get tokens() { return tokens; }, get settings() { return settings; },
   get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; },
-  get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; }
+  get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
+  selectMap, useStair, changed
 };
 
 window.addEventListener('pagehide', () => { try { if (net) net.disconnect(); } catch (e) {} });
