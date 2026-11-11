@@ -182,6 +182,7 @@ const cloneInventory = inv => (inv || []).map(x => ({ name: x.name, qty: x.qty }
 const MOVES = { strike: 'grapple', grapple: 'counter', counter: 'strike' };
 const WIN_MOVES = { strike: 'counter', grapple: 'strike', counter: 'grapple' };
 const MOVE_LABEL = { strike: 'Strike', grapple: 'Grapple', counter: 'Counter' };
+const FORCE_MOVES = { win: 'Win', lose: 'Lose' };
 const MISS = { strike: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], grapple: ['tripped', 'locked', 'barred', 'extended'] };
 const HIT_ZONE = ['head', 'ribcage', 'arm', 'chest', 'neck', 'gut'];
 const GRAPPLE_ZONE = ['ankle', 'knee', 'elbow', 'shoulder', 'neck'];
@@ -488,6 +489,15 @@ function computeRegions() {
     d.regs = [...regs];
   }
   for (const l of map.lights) { const r = near(l.x, l.y); l.region = outside.has(r) ? 0 : r; }
+  map.floor = { s, w: cw, h: ch, lab, outside };
+}
+function isFloorPoint(x, y) {
+  const f = map && map.floor;
+  if (!f) return true;
+  const cx = Math.round(x * f.s), cy = Math.round(y * f.s);
+  if (cx < 0 || cy < 0 || cx >= f.w || cy >= f.h) return false;
+  const v = f.lab[cy * f.w + cx];
+  return v > 0 && !f.outside.has(v);
 }
 
 function rebuildBlockers() {
@@ -524,6 +534,7 @@ function visPoly(ox, oy, R) {
 }
 function openRegions() { const s = new Set(); for (const d of map.doors) if (d.open) for (const r of d.regs) s.add(r); return s; }
 function lightOn(l, open) {
+  if (setupPhase) return true;
   if (l.force !== null) return l.force;
   if (settings.mode === 'all') return true;
   if (settings.mode === 'off') return false;
@@ -1343,7 +1354,7 @@ function freeSpawnSlots(count, center) {
   const cr = Math.max(0, Math.min(maxRow - 1, Math.floor(center.y / g)));
   const offsets = [[0, 0]];
   const maxR = Math.max(maxCol, maxRow);
-  for (let r = 1; r <= maxR && offsets.length < count * 4; r++) {
+  for (let r = 1; r <= maxR; r++) {
     for (let x = -r; x <= r; x++) { offsets.push([x, -r], [x, r]); }
     for (let y = -r + 1; y < r; y++) { offsets.push([-r, y], [r, y]); }
   }
@@ -1353,8 +1364,10 @@ function freeSpawnSlots(count, center) {
     if (col < 0 || row < 0 || col >= maxCol || row >= maxRow) continue;
     const key = col + ',' + row;
     if (used.has(key)) continue;
+    const wx = (col + 0.5) * g, wy = (row + 0.5) * g;
+    if (!isFloorPoint(wx, wy)) continue;
     used.add(key);
-    out.push({ x: (col + 0.5) * g, y: (row + 0.5) * g });
+    out.push({ x: wx, y: wy });
     if (out.length >= count) break;
   }
   while (out.length < count) out.push({ x: center.x, y: center.y });
@@ -1388,7 +1401,11 @@ function spawnEnemies(role, count) {
   const unitLabel = preset.label || role;
   logEvent(`GM spawns ${count} × ${unitLabel} on ${map.name}.`);
   changed();
-  showMsg(`${count} × ${unitLabel} spawned. Drag them into position.`);
+  const playersHere = tokens.filter(t => t.layer === 'player' && t.mapKey === map.key && !isDown(t)).length;
+  const noVision = playersHere ? '' : ' No player character is on this deck, so players will not see them.';
+  const darkRooms = settings.mode === 'auto' && !map.doors.some(d => d.open)
+    ? ' Rooms stay dark until a door opens; use Lighting → All lights on to reveal them.' : '';
+  showMsg(`${count} × ${unitLabel} spawned. Drag them into position.${noVision}${darkRooms}`);
 }
 function placeSetupUnit() {
   if (!isHost() || !map) return;
@@ -1396,9 +1413,9 @@ function placeSetupUnit() {
   const t = tokenById(id);
   if (!t) return;
   if (t.mapKey !== map.key) {
-    const c = viewCenterWorld();
+    const slot = freeSpawnSlots(1, viewCenterWorld())[0] || viewCenterWorld();
     t.mapKey = map.key;
-    t.x = c.x; t.y = c.y;
+    t.x = slot.x; t.y = slot.y;
     snapTok(t);
     logEvent(`GM places ${t.name} on ${map.name}.`);
   }
@@ -1411,14 +1428,11 @@ function movePlayersToDeck() {
   const players = tokens.filter(t => t.layer === 'player');
   const moving = players.filter(t => t.mapKey !== map.key);
   if (!moving.length) { showMsg('All player characters are already on this deck.'); return; }
-  const c = viewCenterWorld();
-  const gap = map.ppg * 1.25;
-  const offsets = [[-1, -1], [1, -1], [-1, 1], [1, 1], [-2, 0], [2, 0], [0, -2], [0, 2]];
+  const slots = freeSpawnSlots(moving.length, viewCenterWorld());
   moving.forEach((t, i) => {
-    const [ox, oy] = offsets[i % offsets.length];
+    const slot = slots[i] || viewCenterWorld();
     t.mapKey = map.key;
-    t.x = Math.max(map.ppg, Math.min(map.W - map.ppg, c.x + ox * gap));
-    t.y = Math.max(map.ppg, Math.min(map.H - map.ppg, c.y + oy * gap));
+    t.x = slot.x; t.y = slot.y;
     snapTok(t);
   });
   logEvent(`GM moves ${moving.length} player character${moving.length === 1 ? '' : 's'} to ${map.name}.`);
@@ -1431,6 +1445,7 @@ function beginMission() {
   resetMission();
   if (map) mission.maps.add(map.key);
   logEvent('Setup complete. Mission begins.');
+  lightDirty = true; fogDirty = true;
   changed();
   showMsg('Mission started.');
 }
@@ -1711,9 +1726,15 @@ function updateCombatDialog() {
   $('#combatTargetStats').textContent = `HP ${b.hp}/${b.maxHp} · ${w.label} · ${w.type}${isDown(b) ? ' · down' : ''}`;
   $('#combatRange').textContent = reach.text + (reach.ok ? '' : ' — move closer or use a ranged weapon');
   $('#combatRange').dataset.ok = reach.ok ? 'yes' : 'no';
+  $$('#combatMoves .force-option').forEach(btn => { btn.hidden = role !== 'gm'; });
   $$('#combatMoves [data-move]').forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.move === combatChosenMove ? 'true' : 'false'));
   const reactInfo = $('#combatReactInfo');
-  if (b.layer === 'gm') reactInfo.textContent = 'Enemy AI · the hostile picks a random stance.';
+  const forced = role === 'gm' && FORCE_MOVES[combatChosenMove];
+  if (forced) {
+    reactInfo.textContent = combatChosenMove === 'win'
+      ? 'GM override · the attacker wins; the defender takes damage.'
+      : 'GM override · the attacker loses; the attacker takes damage.';
+  } else if (b.layer === 'gm') reactInfo.textContent = 'Enemy AI · the hostile picks a random stance.';
   else if (role === 'player') reactInfo.textContent = 'The GM controls this defender.';
   else {
     const owner = controllerOf(b.id);
@@ -1722,7 +1743,7 @@ function updateCombatDialog() {
       : 'No player is online for this character · random stance.';
   }
   $('#combatGo').disabled = !reach.ok || isDown(b);
-  $('#combatGo').textContent = role === 'player' ? 'Send attack' : 'Attack';
+  $('#combatGo').textContent = role === 'player' ? 'Send attack' : forced ? (combatChosenMove === 'win' ? 'Apply win' : 'Apply loss') : 'Attack';
 }
 function controllerOf(tokenId) {
   return roster.find(r => r.tokenId === tokenId) || null;
@@ -1862,6 +1883,56 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   changed();
   return { ok: true, messages, targetHp: b.hp };
 }
+function performForcedExchange(attackerId, targetId, outcome) {
+  const a = tokenById(attackerId), b = tokenById(targetId);
+  if (!a || !b) return { error: 'That combatant is no longer on the table.' };
+  if (a.id === b.id) return { error: 'A token cannot fight itself.' };
+  if (!FORCE_MOVES[outcome]) return { error: 'Choose Win or Lose.' };
+  if (setupPhase) return { error: 'Begin the mission before resolving combat.' };
+  if (isDown(a)) return { error: a.name + ' is down.' };
+  if (isDown(b)) return { error: b.name + ' is already down.' };
+  if (settings.turnBased) {
+    if (turn.activeId !== a.id) return { error: 'It is not ' + a.name + "'s turn." };
+    if (turn.attacked && turn.attacked[a.id]) return { error: a.name + ' has already attacked this turn.' };
+  }
+  const reach = combatReach(a, b);
+  if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
+  if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
+  missionToken(a); missionToken(b);
+  const aPre = healthPct(a), bPre = healthPct(b);
+  const messages = [`GM ruling: ${outcome === 'win' ? a.name : b.name} wins the exchange.`];
+  missionDamageCtx = [];
+  if (outcome === 'win') dealCombatDamage(b, damageWithWeapon(a), messages);
+  else dealCombatDamage(a, damageWithWeapon(b), messages);
+  let aDamageTaken = 0, bDamageTaken = 0;
+  for (const hit of missionDamageCtx) {
+    if (hit.targetId === a.id) aDamageTaken += hit.amount;
+    else if (hit.targetId === b.id) bDamageTaken += hit.amount;
+  }
+  missionDamageCtx = null;
+  healthConditions(a, aPre, healthPct(a), messages);
+  healthConditions(b, bPre, healthPct(b), messages);
+  if (b.hp <= 0 && a.hp > 0) messages.push(`${a.name} is victorious.`);
+  else if (a.hp <= 0 && b.hp > 0) messages.push(`${b.name} is victorious.`);
+  else if (a.hp <= 0 && b.hp <= 0) messages.push('Both combatants are down.');
+  const recA = missionToken(a), recB = missionToken(b);
+  recA.damageDealt += bDamageTaken; recA.damageTaken += aDamageTaken; recA.attacksMade++;
+  recB.damageDealt += aDamageTaken; recB.damageTaken += bDamageTaken; recB.attacksReceived++;
+  const forcedLabel = outcome === 'win' ? 'GM forced win' : 'GM forced loss';
+  recordMissionAction(a, `${forcedLabel} against ${b.name}; dealt ${bDamageTaken} damage.`);
+  recordMissionAction(b, `${forcedLabel} against ${a.name}; took ${bDamageTaken} damage; dealt ${aDamageTaken} damage.`);
+  mission.attacks.push({
+    t: Date.now(), attackerId: a.id, attacker: a.name, targetId: b.id, target: b.name,
+    attack: forcedLabel, reaction: 'GM ruling', aiRoll: null,
+    damageToTarget: bDamageTaken, damageToAttacker: aDamageTaken,
+    targetHp: b.hp, targetMax: b.maxHp, attackerHp: a.hp, attackerMax: a.maxHp
+  });
+  logEvent(`${a.name} vs ${b.name} — ${forcedLabel}.\n${messages.join('\n')}`, 'combat');
+  showMsg(`${forcedLabel}: ${outcome === 'win' ? b.name : a.name} takes damage.`);
+  fogDirty = true;
+  changed();
+  return { ok: true, messages, targetHp: b.hp };
+}
 function submitCombat() {
   if (!combatCtx) return;
   const a = tokenById(combatCtx.attackerId);
@@ -1875,6 +1946,14 @@ function submitCombat() {
     closeCombat();
     showMsg('Attack queued for the GM.');
     return;
+  }
+  if (FORCE_MOVES[move]) {
+    const forced = performForcedExchange(a.id, b.id, move);
+    if (forced.error) {
+      const box = $('#combatResult'); box.hidden = false; box.textContent = forced.error;
+      return;
+    }
+    closeCombat(); return;
   }
   if (b.layer === 'player' && requestPlayerDefense(a, b, move)) { closeCombat(); return; }
   const result = performAttack(a.id, b.id, move, 'auto');

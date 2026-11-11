@@ -111,6 +111,14 @@ stairs yet. The Map selector chooses the deck being prepared.
 - Press **Begin mission** when ready. This starts the mission log; setup moves
   and placement are not counted as part of the mission.
 
+Players only see hostiles when their own living character is on the deck, the
+hostile is inside the character's line of sight, and its square is lit. If
+spawned enemies seem invisible, move a player character to that deck, open the
+room's door, or switch **Lighting** to **All lights on**. Setup mode lights every
+room automatically; normal door/lighting rules resume after **Begin mission**.
+Spawning also warns when no player character is on the current deck or when every
+room is unlit.
+
 ### Mission reports
 
 When the mission is over, the GM presses **End mission & download log** in the
@@ -133,6 +141,10 @@ session does not lose the mission history.
 The map picker lists the built-in scenes in `assets/maps/`. Each map is a UVTT
 scene file plus its PNG, so selecting a map is a small JSON fetch and never
 sends the image through the live session.
+
+Kamekh, Dorkir and both Dorkathi decks have room lights baked into their scene
+files. In **Lighting → Follow doors**, opening a door lights that room; **All
+lights on** reveals every room at once.
 
 Dorkathi is split into **Lower deck** and **Upper deck**, grouped together in
 the picker. The two decks are connected at the **Central ladder** marker near
@@ -253,6 +265,10 @@ Combat is a browser port of the supplied `melee.py` rules.
   the request under **Attack queue**, picks the hostile's stance (or leaves it
   on AI random), then presses **Resolve attack**. Cancelling the request lets the
   player act again.
+- The GM's attack dialog has two extra override options below the normal moves:
+  **Win** makes the attacker win the exchange and damage the defender; **Lose**
+  makes the attacker lose and take the defender's damage. These bypass the
+  normal stance matrix and any player stance prompt.
 - When a hostile attacks a player, the player's **Choose your stance** pop-up
   asks them to pick Strike, Grapple or Counter. The attack resolves on the host
   after their answer. If they do not answer within 30 seconds, a random stance

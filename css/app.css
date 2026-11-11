@@ -258,6 +258,9 @@ body{min-height:100dvh}
 .moveselect button span{font-size:10px;color:var(--muted)}
 .moveselect button[aria-pressed=true]{border-color:var(--accent);background:rgba(242,169,59,.1)}
 .moveselect button[aria-pressed=true] b{color:var(--accent)}
+.moveselect button.force-option{border-style:dashed}
+.moveselect button.force-option[aria-pressed=true]{border-color:var(--gm);background:rgba(229,96,79,.12)}
+.moveselect button.force-option[aria-pressed=true] b{color:var(--gm)}
 .combatresult{margin:12px 18px 0;border:1px solid var(--gm);background:rgba(229,96,79,.1);color:#ffb4aa;
   border-radius:6px;padding:8px 10px;font-size:12px;white-space:pre-wrap}
 .dlgactions{padding:16px 18px 18px;justify-content:flex-end}

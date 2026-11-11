@@ -125,7 +125,7 @@
       <div class="row">
         <button class="btn primary" id="beginMission" type="button">Begin mission</button>
       </div>
-      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Spawn preset enemies above, or create custom units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section.</div>
+      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Spawn preset enemies above, or create custom units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section. Players only see a deck when their character is on it; open a door or use <b>All lights on</b> to reveal a room.</div>
     </section>
 
     <section class="sec gm-only" id="turnSec">
@@ -260,6 +260,8 @@
     <button type="button" data-move="strike"><b>Strike</b><span>beats grapple</span></button>
     <button type="button" data-move="grapple"><b>Grapple</b><span>beats counter</span></button>
     <button type="button" data-move="counter"><b>Counter</b><span>beats strike</span></button>
+    <button type="button" class="force-option" data-move="win"><b>Win</b><span>GM rules attacker wins</span></button>
+    <button type="button" class="force-option" data-move="lose"><b>Lose</b><span>GM rules attacker loses</span></button>
   </div>
   <div class="field" id="combatReactWrap">
     <span>Defender reaction</span>
