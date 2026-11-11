@@ -82,6 +82,23 @@ window.MC_CONFIG = {
 7. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
 
+### Mission reports
+
+When the mission is over, the GM presses **End mission & download log** in the
+**Mission** section. It downloads a Markdown report named
+`marine-commander-combat-log-<timestamp>.md` containing:
+
+- final status, HP, weapon and controller for every player character and every
+  hostile;
+- damage dealt and taken, attacks made and suffered, defensive stances, items
+  used, stairs used and distance moved for each combatant;
+- every combat exchange with the attack, reaction, damage and remaining HP;
+- the full chronological mission log, including door, turn, inventory and chat
+  events.
+
+The report is also kept in the solo save and host checkpoint, so resuming a
+session does not lose the mission history.
+
 ### Maps and decks
 
 The map picker lists the built-in scenes in `assets/maps/`. Each map is a UVTT
@@ -209,7 +226,9 @@ Combat is a browser port of the supplied `melee.py` rules.
   after their answer. If they do not answer within 30 seconds, a random stance
   is used so the game cannot stall.
 - Hits disarm the defender (as in `melee.py`), damage applies, and stagger /
-  bloodied / victory messages go to the table log.
+  bloodied / victory messages go to the table log. Dropping to 60% or less marks
+  the token **Staggered**; dropping to 30% or less replaces that with
+  **Bloodied**.
 - Players attack hostiles from their sheet; the action is validated by the host
   and the result is synced to everyone. The GM can attack with any token whose
   turn is active.

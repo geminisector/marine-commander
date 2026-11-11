@@ -62,6 +62,7 @@ let net = null, roomCode = '', hostName = '', hostOnline = true, netState = 'liv
 let me = { clientId: getClientId(), name: '', tokenId: null };
 let roster = [], logRows = [], rev = 0;
 let mission = newMission();
+let missionDamageCtx = null;
 let turn = { number: 1, activeId: null, moved: {}, attacked: {} };
 let anim = null;                    // unused animation slot kept for scene resets
 let syncTimer = 0, saveTimer = 0, msgTimer = 0;
@@ -827,6 +828,12 @@ function applySnapshot(s, initial = false) {
   turn = s.turn && typeof s.turn.number === 'number' ? { number: s.turn.number, activeId: s.turn.activeId ?? null, moved: s.turn.moved || {}, attacked: s.turn.attacked || {} } : { number: 1, activeId: null, moved: {}, attacked: {} };
   roster = Array.isArray(s.roster) ? s.roster : [];
   logRows = Array.isArray(s.log) ? s.log.slice(-70) : [];
+  if (!mission.events.length && logRows.length) {
+    mission.events = logRows.map(e => Object.assign({}, e));
+    const first = logRows[0].t || Date.now();
+    if (first < mission.startedAt) mission.startedAt = first;
+  }
+  if (map) mission.maps.add(map.key);
   syncMyToken();
   syncSettingsUI(); updateDoorCount();
   fogDirty = true; lightDirty = true;
@@ -1146,6 +1153,7 @@ $('#zIn').onclick = () => zoomAt(1.25, cv.clientWidth / 2, cv.clientHeight / 2);
 $('#zOut').onclick = () => zoomAt(0.8, cv.clientWidth / 2, cv.clientHeight / 2);
 $('#btnFit').onclick = fitView;
 $('#mapSelect').onchange = e => selectMap(e.target.value);
+$('#btnEndMission').onclick = endMission;
 
 /* ---------- panel wiring ---------- */
 $$('.lrow[data-layer]').forEach(row => {
@@ -1432,15 +1440,24 @@ function closeCombat() {
   if (dlg.open) dlg.close();
   combatCtx = null;
 }
-function healthConditions(pre, post, name, out) {
-  if (post <= 60 && pre > 60) out.push(`${name} is staggered.`);
-  if (post <= 30 && pre > 30) out.push(`${name} is bloodied.`);
-  if (post < -25) out.push(`${name} requires immediate medical attention.`);
+function updateHealthStatus(t, prePct, postPct, out = null) {
+  if (postPct <= 30 && prePct > 30) {
+    t.status = 'Bloodied';
+    if (out) out.push(`${t.name} is bloodied.`);
+  } else if (postPct <= 60 && prePct > 60) {
+    t.status = 'Staggered';
+    if (out) out.push(`${t.name} is staggered.`);
+  }
+}
+function healthConditions(t, pre, post, out) {
+  updateHealthStatus(t, pre, post, out);
+  if (post < -25) out.push(`${t.name} requires immediate medical attention.`);
 }
 function dealCombatDamage(target, amount, messages) {
   const dmg = Math.max(0, Math.floor(amount));
   if (dmg <= 0) return 0;
   target.hp = Math.max(0, target.hp - dmg);
+  if (missionDamageCtx) missionDamageCtx.push({ targetId: target.id, amount: dmg });
   messages.push(`${target.name} takes ${dmg} damage (${target.hp}/${target.maxHp}).`);
   if (weaponKeyOf(target)) {
     messages.push(`${target.name} is disarmed.`);
@@ -1498,8 +1515,8 @@ function resolveExchange(a, b, aMove, bMove, aiRoll) {
       messages.push(`${a.name} and ${b.name} stare each other down.`);
     }
   }
-  healthConditions(aPre, healthPct(a), a.name, messages);
-  healthConditions(bPre, healthPct(b), b.name, messages);
+  healthConditions(a, aPre, healthPct(a), messages);
+  healthConditions(b, bPre, healthPct(b), messages);
   if (b.hp <= 0 && a.hp > 0) messages.push(`${a.name} is victorious.`);
   else if (a.hp <= 0 && b.hp > 0) messages.push(`${b.name} is victorious.`);
   else if (a.hp <= 0 && b.hp <= 0) messages.push('Both combatants are down.');
@@ -1526,10 +1543,14 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false)
   }
   if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
   missionToken(a); missionToken(b);
-  const aHpBefore = a.hp, bHpBefore = b.hp;
+  missionDamageCtx = [];
   const messages = resolveExchange(a, b, move, bMove, aiRoll);
-  const aDamageTaken = Math.max(0, aHpBefore - a.hp);
-  const bDamageTaken = Math.max(0, bHpBefore - b.hp);
+  let aDamageTaken = 0, bDamageTaken = 0;
+  for (const hit of missionDamageCtx) {
+    if (hit.targetId === a.id) aDamageTaken += hit.amount;
+    else if (hit.targetId === b.id) bDamageTaken += hit.amount;
+  }
+  missionDamageCtx = null;
   const recA = missionToken(a), recB = missionToken(b);
   recA.damageDealt += bDamageTaken; recA.damageTaken += aDamageTaken; recA.attacksMade++;
   recB.damageDealt += aDamageTaken; recB.damageTaken += bDamageTaken; recB.attacksReceived++;
@@ -1707,9 +1728,14 @@ function hpBlock(t, canEdit, canEditMax) {
 }
 function setHp(t, value) {
   const prev = t.hp;
+  const prePct = t.maxHp > 0 ? (prev * 100) / t.maxHp : 0;
   t.hp = Math.max(0, Math.min(t.maxHp, Math.round(+value || 0)));
+  const postPct = t.maxHp > 0 ? (t.hp * 100) / t.maxHp : 0;
   if (t.hp < prev) logEvent(`${t.name} takes ${prev - t.hp} damage (${t.hp}/${t.maxHp}).`);
   else if (t.hp > prev) logEvent(`${t.name} recovers ${t.hp - prev} HP (${t.hp}/${t.maxHp}).`);
+  const notices = [];
+  if (t.hp < prev) updateHealthStatus(t, prePct, postPct, notices);
+  for (const n of notices) logEvent(n);
   if (prev > 0 && t.hp === 0) logEvent(`${t.name} is down!`);
 }
 function inventoryEditor(t, editable) {
@@ -2004,6 +2030,46 @@ function newMission() {
   return { startedAt: Date.now(), endedAt: null, maps: new Set(), events: [], attacks: [], tokens: new Map() };
 }
 function resetMission() { mission = newMission(); }
+function exportMission() {
+  return {
+    startedAt: mission.startedAt,
+    endedAt: mission.endedAt,
+    maps: [...mission.maps],
+    events: mission.events.slice(-5000),
+    attacks: mission.attacks.slice(-1000),
+    tokens: [...mission.tokens.values()].map(r => Object.assign({}, r, {
+      stances: Object.assign({}, r.stances),
+      items: r.items.slice(-100),
+      actions: r.actions.slice(-250)
+    }))
+  };
+}
+function importMission(raw) {
+  if (!raw || !Number.isFinite(+raw.startedAt)) return false;
+  const tokens = new Map();
+  for (const r of Array.isArray(raw.tokens) ? raw.tokens : []) {
+    if (!r || !Number.isFinite(+r.id)) continue;
+    tokens.set(+r.id, Object.assign({
+      id: +r.id, name: 'Token', layer: 'gm', mapKey: '', weapon: '', maxHp: 0, hp: 0,
+      status: '', startHp: 0, damageDealt: 0, damageTaken: 0, attacksMade: 0, attacksReceived: 0,
+      stances: { strike: 0, grapple: 0, counter: 0, none: 0 },
+      distance: 0, stairs: 0, items: [], actions: [], firstSeen: +raw.startedAt
+    }, r, {
+      stances: Object.assign({ strike: 0, grapple: 0, counter: 0, none: 0 }, r.stances || {}),
+      items: Array.isArray(r.items) ? r.items : [],
+      actions: Array.isArray(r.actions) ? r.actions : []
+    }));
+  }
+  mission = {
+    startedAt: +raw.startedAt,
+    endedAt: raw.endedAt || null,
+    maps: new Set(Array.isArray(raw.maps) ? raw.maps : []),
+    events: Array.isArray(raw.events) ? raw.events : [],
+    attacks: Array.isArray(raw.attacks) ? raw.attacks : [],
+    tokens
+  };
+  return true;
+}
 function missionToken(t) {
   if (!t) return null;
   let rec = mission.tokens.get(t.id);
@@ -2030,6 +2096,147 @@ function recordMissionAction(t, text) {
 function addMissionDistance(t, squares) {
   if (!t || !Number.isFinite(squares) || squares <= 0) return;
   missionToken(t).distance += squares;
+}
+function escapeMd(v) { return String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim(); }
+function clockOf(t) {
+  return new Date(t || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+function durationText(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h ? h + 'h ' : '') + (h || m ? m + 'm ' : '') + sec + 's';
+}
+function missionDeck(rec) {
+  const meta = MAP_BY_ID.get(rec.mapKey);
+  return meta ? mapLabel(meta) : 'Custom map';
+}
+function missionController(rec) {
+  if (rec.layer !== 'player') return 'GM';
+  const member = roster.find(r => r.tokenId === rec.id);
+  return member ? member.name : 'Unassigned';
+}
+function missionStatus(rec) {
+  if (rec.hp <= 0) return 'Down';
+  return rec.status || 'Active';
+}
+function missionWeapon(rec) {
+  return (WEAPONS[rec.weapon] || UNARMED).label;
+}
+function itemSummary(items) {
+  const counts = new Map();
+  for (const name of items || []) counts.set(name, (counts.get(name) || 0) + 1);
+  return [...counts].map(([name, n]) => n > 1 ? `${name} ×${n}` : name).join(', ') || '—';
+}
+function buildMissionReport() {
+  if (map) mission.maps.add(map.key);
+  for (const t of tokens) missionToken(t);
+  const endedAt = mission.endedAt || Date.now();
+  const records = [...mission.tokens.values()].sort((a, b) =>
+    (a.layer === b.layer ? a.name.localeCompare(b.name) : a.layer === 'player' ? -1 : 1));
+  const players = records.filter(r => r.layer === 'player');
+  const hostiles = records.filter(r => r.layer !== 'player');
+  const down = r => r.hp <= 0 || /^dead$/i.test((r.status || '').trim());
+  const pAlive = players.filter(r => !down(r)).length;
+  const hAlive = hostiles.filter(r => !down(r)).length;
+  const outcome = !players.length ? 'No player characters' : !pAlive ? 'Mission failure'
+    : hostiles.length && !hAlive ? 'Player victory' : 'Mission ended with hostiles still standing';
+  const maps = [...mission.maps].map(id => mapLabel(MAP_BY_ID.get(id))).filter(Boolean);
+  const session = roomCode ? 'Live session ' + roomCode : 'Solo GM';
+  const L = [];
+  L.push('# Marine Commander — Mission Combat Log', '');
+  L.push('- **Mission started:** ' + new Date(mission.startedAt).toLocaleString());
+  L.push('- **Mission ended:** ' + new Date(endedAt).toLocaleString());
+  L.push('- **Duration:** ' + durationText(endedAt - mission.startedAt));
+  L.push('- **Session:** ' + session);
+  L.push('- **Host:** ' + (hostName || me.name || 'GM'));
+  L.push('- **Deck(s):** ' + (maps.length ? maps.join(', ') : '—'));
+  L.push('- **Outcome:** ' + outcome);
+  L.push('- **Players standing:** ' + pAlive + '/' + players.length + ' · **Hostiles standing:** ' + hAlive + '/' + hostiles.length);
+  L.push('');
+
+  const writeRoster = (title, list) => {
+    L.push('## ' + title, '');
+    if (!list.length) { L.push('_None._', ''); return; }
+    L.push('| Character | Controller | Deck | HP | Status | Weapon | Damage dealt | Damage taken | Attacks made / suffered | Stances (S/G/C) | Moved (sq) |');
+    L.push('| --- | --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |');
+    for (const r of list) {
+      const st = r.stances || {};
+      L.push('| ' + [
+        escapeMd(r.name), escapeMd(missionController(r)), escapeMd(missionDeck(r)),
+        r.hp + '/' + r.maxHp, escapeMd(missionStatus(r)), escapeMd(missionWeapon(r)),
+        fmt(r.damageDealt), fmt(r.damageTaken), r.attacksMade + ' / ' + r.attacksReceived,
+        (st.strike || 0) + '/' + (st.grapple || 0) + '/' + (st.counter || 0),
+        fmt(r.distance)
+      ].join(' | ') + ' |');
+    }
+    L.push('');
+  };
+  writeRoster('Player characters', players);
+  writeRoster('Hostiles and NPCs', hostiles);
+
+  L.push('## What each combatant did', '');
+  for (const r of records) {
+    L.push('### ' + r.name + ' — ' + (r.layer === 'player' ? 'player' : 'hostile'));
+    const notes = [];
+    if (r.items.length) notes.push('Items used: ' + itemSummary(r.items) + '.');
+    if (r.stairs) notes.push('Used stairs ' + r.stairs + ' time' + (r.stairs === 1 ? '' : 's') + '.');
+    if (r.distance > 0) notes.push('Moved ' + fmt(r.distance) + ' squares.');
+    if (r.actions.length) {
+      for (const a of r.actions) notes.push('[' + clockOf(a.t) + '] ' + a.text);
+    }
+    if (!notes.length) notes.push('No recorded actions.');
+    for (const n of notes) L.push('- ' + n);
+    L.push('');
+  }
+
+  L.push('## Combat exchanges', '');
+  if (!mission.attacks.length) L.push('_No attacks were made._', '');
+  else {
+    L.push('| # | Time | Attacker | Target | Attack | Defence | Damage to target | Damage to attacker | Target HP after |');
+    L.push('| ---: | --- | --- | --- | --- | --- | ---: | ---: | --- |');
+    mission.attacks.forEach((a, i) => {
+      L.push('| ' + [
+        i + 1, clockOf(a.t), escapeMd(a.attacker), escapeMd(a.target), escapeMd(a.attack),
+        escapeMd(a.reaction + (a.aiRoll ? ' (d20 ' + a.aiRoll + ')' : '')),
+        fmt(a.damageToTarget), fmt(a.damageToAttacker), a.targetHp + '/' + a.targetMax
+      ].join(' | ') + ' |');
+    });
+    L.push('');
+  }
+
+  L.push('## Full mission log', '');
+  if (!mission.events.length) L.push('_No events recorded._');
+  else {
+    for (const e of mission.events) {
+      const lines = String(e.text || '').split(/\r?\n/);
+      L.push('- **' + clockOf(e.t) + '** [' + (e.kind || 'sys') + '] ' + lines[0]);
+      for (const line of lines.slice(1)) L.push('  ' + line);
+    }
+  }
+  L.push('');
+  return L.join('\n');
+}
+function downloadMissionReport() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const text = buildMissionReport();
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'marine-commander-combat-log-' + stamp + '.md';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+function endMission() {
+  if (!isHost()) return;
+  if (!confirm('End this mission and download the combat log?')) return;
+  mission.endedAt = Date.now();
+  logEvent('Mission ended. Combat log downloaded.');
+  downloadMissionReport();
+  showMsg('Mission ended — combat log downloaded.');
+  changed();
 }
 function updateTurnUI() {
   const active = tokenById(turn.activeId);
@@ -2271,11 +2478,15 @@ function scheduleSave() {
   }, 450);
 }
 function saveSolo() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(makeSnapshot())); } catch (e) { showMsg('Could not save in this browser (storage full). Smaller token images help.'); }
+  try {
+    const snap = makeSnapshot();
+    snap.mission = exportMission();
+    localStorage.setItem(STORE_KEY, JSON.stringify(snap));
+  } catch (e) { showMsg('Could not save in this browser (storage full). Smaller token images help.'); }
 }
 function saveHostCheckpoint() {
   if (sessionRole !== 'host' || !map || !MAP_BY_ID.has(map.key)) return;
-  try { localStorage.setItem(HOST_SAVE_KEY, JSON.stringify({ room: roomCode, name: me.name, snapshot: makeSnapshot(), ts: Date.now() })); } catch (e) {}
+  try { localStorage.setItem(HOST_SAVE_KEY, JSON.stringify({ room: roomCode, name: me.name, snapshot: makeSnapshot(), mission: exportMission(), ts: Date.now() })); } catch (e) {}
 }
 function readSaved(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
 async function loadSoloSave() {
@@ -2283,7 +2494,7 @@ async function loadSoloSave() {
   if (!s || !MAP_BY_ID.has(s.mapKey) || !Array.isArray(s.tokens)) return false;
   if (!map || map.key !== s.mapKey) await loadMapById(s.mapKey);
   applySnapshot(s, true);
-  if (s.settings && Array.isArray(s.roster)) { /* applied */ }
+  if (s.mission) importMission(s.mission);
   return true;
 }
 function loadHostCheckpoint() {
@@ -2366,6 +2577,7 @@ async function startHost(resume) {
     if (resume) {
       if (resume.snapshot.mapKey && (!map || resume.snapshot.mapKey !== map.key)) await loadMapById(resume.snapshot.mapKey);
       applySnapshot(resume.snapshot, true);
+      if (resume.mission) importMission(resume.mission);
       roster = (resume.snapshot.roster || []).map(r => Object.assign({}, r, { online: false, lastSeen: 0 }));
       logRows = Array.isArray(resume.snapshot.log) ? resume.snapshot.log.slice(-70) : [];
       renderAll();
@@ -2482,6 +2694,7 @@ window.__marineCommander = {
   get map() { return map; }, get tokens() { return tokens; }, get settings() { return settings; },
   get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; },
   get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
+  get mission() { return mission; }, buildMissionReport,
   selectMap, useStair, changed
 };
 
