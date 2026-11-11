@@ -298,6 +298,21 @@
   <div id="defenseResult" class="combatresult" hidden></div>
 </dialog>
 
+<dialog id="gmAuthDlg" class="dlg" aria-labelledby="gmAuthTitle">
+  <div class="dlghead">
+    <div><div class="kicker">HOST ACCESS</div><h2 id="gmAuthTitle">GM password</h2></div>
+    <button class="btn tiny" id="gmAuthClose" type="button">Close</button>
+  </div>
+  <label class="field" for="gmPassword">Password
+    <input id="gmPassword" type="password" autocomplete="current-password" maxlength="80" placeholder="Enter the GM password">
+  </label>
+  <div id="gmAuthError" class="sub" role="status"></div>
+  <div class="row dlgactions">
+    <button class="btn primary" id="gmAuthGo" type="button">Unlock GM tools</button>
+    <button class="btn" id="gmAuthCancel" type="button">Cancel</button>
+  </div>
+</dialog>
+
 <script src="vendor/mqtt.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/net.js"></script>

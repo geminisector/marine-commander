@@ -76,6 +76,7 @@ const pendingPlayerAttacks = new Map(); // host: requestId -> { id, clientId, at
 let pendingAttacks = [];                // player: snapshot copy of the attack queue
 const openStats = new Set();
 let busy = false;
+let gmUnlocked = false, pendingHostAction = null;
 
 const pointers = new Map();
 let drag = null, pinch = null;
@@ -2879,6 +2880,48 @@ async function ensureMap() {
   await loadDefaultMap();
 }
 
+function openHostGate(action) {
+  const expected = String(CFG.hostPassword || '');
+  if (!expected || gmUnlocked) { action(); return; }
+  pendingHostAction = action;
+  const err = $('#gmAuthError');
+  err.textContent = '';
+  err.dataset.kind = '';
+  $('#gmPassword').value = '';
+  const dlg = $('#gmAuthDlg');
+  if (!dlg.open) dlg.showModal();
+  setTimeout(() => $('#gmPassword').focus(), 40);
+}
+function closeHostGate() {
+  pendingHostAction = null;
+  const dlg = $('#gmAuthDlg');
+  if (dlg.open) dlg.close();
+  $('#gmPassword').value = '';
+  $('#gmAuthError').textContent = '';
+}
+function submitHostGate() {
+  const expected = String(CFG.hostPassword || '');
+  if ($('#gmPassword').value !== expected || !expected) {
+    const err = $('#gmAuthError');
+    err.textContent = 'That password does not match.';
+    err.dataset.kind = 'err';
+    $('#gmPassword').select();
+    return;
+  }
+  gmUnlocked = true;
+  const action = pendingHostAction;
+  closeHostGate();
+  if (action) action();
+}
+$('#gmAuthGo').onclick = submitHostGate;
+$('#gmAuthClose').onclick = closeHostGate;
+$('#gmAuthCancel').onclick = closeHostGate;
+$('#gmPassword').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); submitHostGate(); }
+});
+$('#gmAuthDlg').addEventListener('cancel', e => { e.preventDefault(); closeHostGate(); });
+$('#gmAuthDlg').addEventListener('click', e => { if (e.target === $('#gmAuthDlg')) closeHostGate(); });
+
 async function startHost(resume) {
   if (busy) return;
   if (!(window.crypto && crypto.subtle)) { bootStatus('Live sync needs a secure page (HTTPS or localhost).', 'err'); return; }
@@ -2968,7 +3011,7 @@ async function startSolo() {
   }
 }
 
-$('#btnHost').onclick = () => startHost(null);
+$('#btnHost').onclick = () => openHostGate(() => startHost(null));
 $('#btnJoin').onclick = () => {
   const row = $('#joinRow');
   if (row.hidden) {
@@ -2980,9 +3023,9 @@ $('#btnJoin').onclick = () => {
 };
 $('#btnJoinGo').onclick = () => startPlayer($('#roomCode').value);
 $('#roomCode').addEventListener('keydown', e => { if (e.key === 'Enter') startPlayer($('#roomCode').value); });
-$('#btnSolo').onclick = startSolo;
-$('#btnResume').onclick = () => { const saved = loadHostCheckpoint(); if (saved) startHost(saved); };
-$('#playerName').addEventListener('keydown', e => { if (e.key === 'Enter' && $('#joinRow').hidden) startHost(null); });
+$('#btnSolo').onclick = () => openHostGate(startSolo);
+$('#btnResume').onclick = () => { const saved = loadHostCheckpoint(); if (saved) openHostGate(() => startHost(saved)); };
+$('#playerName').addEventListener('keydown', e => { if (e.key === 'Enter' && $('#joinRow').hidden) openHostGate(() => startHost(null)); });
 
 function roomFromHash() {
   const m = location.hash.match(/(?:room|host)=([A-Za-z0-9-]{9,14})/);

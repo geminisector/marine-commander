@@ -72,6 +72,9 @@ window.MC_CONFIG = {
       ]
     }
   ],
+  // Lightweight UX gate for the GM buttons; this is not security.
+  // Set to '' to disable the prompt.
+  hostPassword: 'marine-commander',
   heartbeatMs: 8000,      // host presence refresh
   playerPingMs: 10000,    // player presence refresh
   hostTimeoutMs: 32000,   // players consider the host gone after this

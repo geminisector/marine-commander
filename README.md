@@ -68,6 +68,12 @@ window.MC_CONFIG = {
 
 ### Host / GM
 
+**Host a session**, **Solo GM** and **Resume hosted session** ask for the GM
+password first. The default is `marine-commander`; change `hostPassword` in
+[`js/config.js`](js/config.js), or set it to `''` to remove the prompt. This is
+a quick UX gate so players do not wander into the GM controls — it is not
+security, because the password ships in the static client.
+
 1. Enter a display name and choose **Host a session**.
 2. Share the code or press **Copy invite**.
 3. Pick the deck from the **Map** selector in the header. Every player follows
