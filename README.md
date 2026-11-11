@@ -79,6 +79,43 @@ window.MC_CONFIG = {
 6. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
 
+### The Cortez boarding party
+
+The built-in scene starts with the four heroes and a ten-strong hostile
+boarding party drawn from `assets/tokens/human/`:
+
+| Hero | Callsign | Portrait | Weapon |
+| --- | --- | --- | --- |
+| Leni Henari | Killmeister | `killmeister.webp` | Laser rifle |
+| Keyan Steele | Enforcer | `enforcer-head.png` | Laser rifle |
+| Cyric Karde | Talon | `talon.jpg` | Laser rifle |
+| Derek Miles | Tinman | `tinman.webp` | Laser rifle |
+
+| Hostile role | Count | Weapon | Starting area |
+| --- | --- | --- | --- |
+| Pilot | 4 | Laser | Major fighter bay |
+| Grunt | 2 | Rifle | Hangar centre aisle |
+| Navigator | 2 | Knife | Bridge / navigation corridor |
+| Medic | 1 | Stun rod | Landing pad |
+| Engineer | 1 | Club | Engines |
+
+The token `img` field points at the portrait file (for example
+`assets/tokens/human/pilot.png`) instead of embedding base64. The browser
+loads the portrait directly, so solo saves and host checkpoints stay small;
+portraits are centre-cropped to fill the round token. The layout lives in
+`defaultTokens()` in [`js/app.js`](js/app.js); edit the `hero(...)` and
+`hostile(...)` lists there to change names, stats, weapons, starting squares or
+portraits. Hero names are fixed: assigning a seat does not rename the character.
+
+To place a token by hand, set its name, colour and size and press **Add
+hostile**; it appears at the centre of the current view. Drag it to position it
+(**Shift-drag** ignores walls), or press **Img** in its roster row to upload a
+portrait. Placement is part of the table state: Solo GM autosaves to
+`localStorage`, a host writes a checkpoint after every change and offers
+**Resume**, and live players receive the host's layout. **Reset scene** restores
+the preset above; an existing solo save is restored when you re-enter, so use
+**Reset scene** (or clear the `cortez-solo-v4` key) to pick up a changed preset.
+
 ### Player
 
 1. Enter a display name, choose **Join with a code**, and enter the GM's code
@@ -98,8 +135,8 @@ Combat is a browser port of the supplied `melee.py` rules.
 - Derived values: `Melee skill = max(Melee, Martial Arts, Dance × 0.66)`,
   `Damage = round(skill / 2)` (minimum 1), and `Max HP = Athletic × 2 + skill`.
   Changing a stat recalculates max HP while preserving damage already taken.
-- Weapons: knife, stick, club, sword and stun rod are melee; **laser, mass
-  driver and rifle are ranged**. Ranged attacks have no range limit. Melee
+- Weapons: knife, stick, club, sword and stun rod are melee; **laser, laser
+  rifle, mass driver and rifle are ranged**. Ranged attacks have no range limit. Melee
   attacks need the tokens to be within `(attacker size + target size) / 2 + 0.5`
   squares; otherwise the Attack button explains that the target is out of reach.
 - On a turn a token can move and make **one attack**. The active token gets an

@@ -8,10 +8,15 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const CFG = window.MC_CONFIG || {};
 const MAX_PLAYERS = CFG.maxPlayers || 8;
-const STORE_KEY = 'cortez-solo-v2';
-const HOST_SAVE_KEY = 'cortez-host-save-v2';
+const STORE_KEY = 'cortez-solo-v4';
+const HOST_SAVE_KEY = 'cortez-host-save-v4';
 const CLIENT_KEY = 'cortez-client-id';
 const APP_NAME = 'Cortez';
+// Built-in characters keep their names when a seat changes hands or is kicked.
+const FIXED_PLAYER_NAMES = new Set([
+  "Leni 'Killmeister' Henari", "Keyan 'Enforcer' Steele",
+  "Cyric 'Talon' Karde", "Derek 'Tinman' Miles"
+]);
 
 const cv = $('#cv'), ctx = cv.getContext('2d');
 const imgs = new Map();
@@ -112,7 +117,8 @@ const WEAPONS = Object.freeze({
   stunrod:    { label: 'Stun rod',   damage: 2,   suckerDamage: 5,   sucker: 'stunned',     verbs: ['zapped', 'electrocuted'], type: 'melee' },
   laser:      { label: 'Laser',      damage: 3,   suckerDamage: 4,   sucker: 'shot',        verbs: ['hit', 'struck'],      type: 'ranged' },
   mass_driver:{ label: 'Mass driver',damage: 3.5, suckerDamage: 3.5, sucker: 'shot',        verbs: ['hit', 'struck'],      type: 'ranged' },
-  rifle:      { label: 'Rifle',      damage: 4,   suckerDamage: 4,   sucker: 'shot',        verbs: ['hit', 'struck'],      type: 'ranged' }
+  rifle:      { label: 'Rifle',      damage: 4,   suckerDamage: 4,   sucker: 'shot',        verbs: ['hit', 'struck'],      type: 'ranged' },
+  laser_rifle:{ label: 'Laser rifle',damage: 4,   suckerDamage: 4,   sucker: 'shot',        verbs: ['hit', 'struck'],      type: 'ranged' }
 });
 const UNARMED = Object.freeze({ label: 'Unarmed', damage: 1, suckerDamage: 1.5, sucker: 'sucker-punched', verbs: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], type: 'melee' });
 const WEAPON_KEYS = Object.keys(WEAPONS);
@@ -256,7 +262,7 @@ function build(d, img, key) {
   computeRegions();
   rebuildBlockers();
   $('#mapinfo').textContent = `${map.name} · ${Math.round(map.W / ppg)}×${Math.round(map.H / ppg)} squares · ${doors.length} doors · ${lights.length} lights`;
-  tokens.forEach(loadTokImg);
+  syncTokenImages();
   renderAll(); updateDoorCount(); lightDirty = true; fogDirty = true;
   requestAnimationFrame(() => { fitView(); invalidate(); });
 }
@@ -268,6 +274,7 @@ function resetToDefaults() {
   nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; anim = null;
   imgs.clear();
   tokens = map.key === 'cortez' ? defaultTokens() : [];
+  syncTokenImages();
   roster = []; logRows = []; selected = null; ruler = null;
   clearExplored(); rebuildBlockers(); lightDirty = true; fogDirty = true;
   updateDoorCount(); renderAll(); invalidate();
@@ -387,23 +394,54 @@ function isLit(x, y) {
 /* ---------- tokens ---------- */
 function defaultTokens() {
   nextId = 1;
-  const mk = (layer, name, color, x, y, size = 1, stats = null, weapon = '') => {
+  const mk = (layer, name, color, x, y, size = 1, stats = null, weapon = '', img = '', inv = null) => {
     const st = normalizeStats(stats, layer, size);
     const maxHp = computeStats(st).maxHp;
-    const inv = layer === 'gm'
+    const bag = inv || (layer === 'gm'
       ? [{ name: 'Frag grenade', qty: 1 }]
-      : [{ name: 'Medkit', qty: 1 }, { name: 'Ammo', qty: 2 }];
-    const t = { id: nextId++, layer, name, color, size, x, y, status: '', hp: maxHp, maxHp, stats: st, weapon, inventory: inv, img: '' };
+      : [{ name: 'Medkit', qty: 1 }, { name: 'Ammo', qty: 2 }]);
+    const t = { id: nextId++, layer, name, color, size, x, y, status: '', hp: maxHp, maxHp, stats: st, weapon, inventory: bag, img };
     snapTok(t); return t;
   };
+  // Pixel centre of a map square (the scene is 64 x 39.25 squares at 16 px each).
+  const sq = (col, row) => [(col + 0.5) * (map ? map.ppg : 16), (row + 0.5) * (map ? map.ppg : 16)];
+  const HUMANS = 'assets/tokens/human/';
+  // Hostile boarding party: 4 pilots, 2 grunts, 2 navigators, 1 medic, 1 engineer.
+  // The token images are referenced by path (not embedded), so saved layouts stay small.
+  const hostile = (role, n, color, col, row, stats, weapon, img, inv) => {
+    const [x, y] = sq(col, row);
+    return mk('gm', role + (n ? ' ' + n : ''), color, x, y, 1, stats, weapon, HUMANS + img, inv);
+  };
+  // The four heroes are fixed characters: their names survive a player taking the seat.
+  const hero = (name, color, x, y, stats, weapon, img, inv) =>
+    mk('player', name, color, x, y, 1, stats, weapon, HUMANS + img, inv);
   return [
-    mk('player', 'Player 1', '#3cc4b1', 552, 300, 1, { melee: 6, martialArts: 0, dance: 0, athletic: 3 }, 'knife'),
-    mk('player', 'Player 2', '#6aa6ff', 552, 322, 1, { melee: 4, martialArts: 5, dance: 4, athletic: 4 }, 'rifle'),
-    mk('player', 'Player 3', '#f2a93b', 586, 300, 1, { melee: 8, martialArts: 2, dance: 0, athletic: 2 }, 'club'),
-    mk('player', 'Player 4', '#c58bff', 586, 322, 1, { melee: 3, martialArts: 3, dance: 9, athletic: 4 }, 'stunrod'),
-    mk('gm', 'Hostile A', '#e5604f', 690, 330, 1, { melee: 6, martialArts: 0, dance: 0, athletic: 3 }, 'knife'),
-    mk('gm', 'Hostile B', '#e5604f', 735, 300, 1, { melee: 6, martialArts: 0, dance: 0, athletic: 3 }, 'club'),
-    mk('gm', 'Hostile C', '#e5604f', 705, 385, 2, { melee: 12, martialArts: 0, dance: 0, athletic: 14 }, 'sword')
+    hero("Leni 'Killmeister' Henari", '#3cc4b1', 552, 300,
+      { melee: 11, martialArts: 0, dance: 7, athletic: 11 }, 'laser_rifle', 'killmeister.webp',
+      [{ name: 'Combat knife', qty: 1 }, { name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Frag grenade', qty: 1 }]),
+    hero("Keyan 'Enforcer' Steele", '#6aa6ff', 552, 322,
+      { melee: 6, martialArts: 0, dance: 0, athletic: 6 }, 'laser_rifle', 'enforcer-head.png',
+      [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
+    hero("Cyric 'Talon' Karde", '#f2a93b', 586, 300,
+      { melee: 0, martialArts: 7, dance: 0, athletic: 5 }, 'laser_rifle', 'talon.jpg',
+      [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
+    hero("Derek 'Tinman' Miles", '#c58bff', 586, 322,
+      { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, 'laser_rifle', 'tinman.webp',
+      [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]),
+
+    hostile('Pilot', 1, '#e5604f', 41, 14, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 2, '#e5604f', 45, 14, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 3, '#e5604f', 42, 24, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 4, '#e5604f', 49, 23, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+
+    hostile('Grunt', 1, '#c0392b', 42, 20, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
+    hostile('Grunt', 2, '#c0392b', 48, 20, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
+
+    hostile('Navigator', 1, '#ef7d4f', 11, 19, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
+    hostile('Navigator', 2, '#ef7d4f', 25, 19, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
+
+    hostile('Medic', 0, '#d9534f', 38, 20, { melee: 3, martialArts: 4, dance: 0, athletic: 4 }, 'stunrod', 'medic.png', [{ name: 'Medkit', qty: 2 }]),
+    hostile('Engineer', 0, '#a93226', 53, 20, { melee: 6, martialArts: 2, dance: 0, athletic: 5 }, 'club', 'engineer.png', [{ name: 'Tool kit', qty: 1 }, { name: 'Frag grenade', qty: 1 }])
   ];
 }
 function snapTok(t) {
@@ -564,6 +602,7 @@ function applySnapshot(s, initial = false) {
   hostName = s.host || hostName;
   tokens = (s.tokens || []).map(t => Object.assign(cleanToken(t), { plan: undefined }));
   nextId = Math.max(0, ...tokens.map(t => t.id)) + 1;
+  syncTokenImages();
   if (map) {
     (s.doors || []).forEach((o, i) => { if (map.doors[i]) map.doors[i].open = !!o; });
     (s.lights || []).forEach((f, i) => { if (map.lights[i]) map.lights[i].force = f; });
@@ -668,7 +707,16 @@ function drawToken(t) {
     ctx.strokeStyle = css('--accent'); ctx.setLineDash([6 / k, 4 / k]); ctx.stroke(); ctx.setLineDash([]);
   }
   ctx.beginPath(); ctx.arc(t.x, t.y + 1.2 / k, r, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fill();
-  if (img) { ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, TAU); ctx.clip(); ctx.drawImage(img, t.x - r, t.y - r, r * 2, r * 2); ctx.restore(); }
+  if (img) {
+    // Cover-fit the portrait: centre-crop the largest square so faces are not squashed.
+    // A dark backing disc keeps cut-out portraits legible against the map.
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const side = Math.min(iw, ih), sx = (iw - side) / 2, sy = (ih - side) / 2;
+    ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, TAU); ctx.fillStyle = '#0d131b'; ctx.fill();
+    ctx.save(); ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, TAU); ctx.clip();
+    ctx.drawImage(img, sx, sy, side, side, t.x - r, t.y - r, r * 2, r * 2);
+    ctx.restore();
+  }
   else { ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, TAU); ctx.fillStyle = t.color; ctx.fill(); }
   ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, TAU);
   if (t.layer === 'gm') {
@@ -1359,9 +1407,24 @@ function useItem(t, idx) {
     logEvent(`${t.name} uses ${it.name}.`); changed();
   }
 }
+function syncTokenImages() {
+  const ids = new Set(tokens.map(t => t.id));
+  for (const id of [...imgs.keys()]) if (!ids.has(id)) imgs.delete(id);
+  for (const t of tokens) loadTokImg(t);
+}
 function loadTokImg(t) {
   if (!t.img) { imgs.delete(t.id); return; }
-  const i = new Image(); i.onload = () => { imgs.set(t.id, i); invalidate(); }; i.src = t.img;
+  const cur = imgs.get(t.id);
+  if (cur && cur._mcSrc === t.img) return;   // same image already decoded
+  const i = new Image();
+  i._mcSrc = t.img;
+  i.onload = () => {
+    const tok = tokenById(t.id);
+    if (!tok || tok.img !== t.img) return;   // token was removed or image changed again
+    imgs.set(t.id, i); invalidate();
+  };
+  i.onerror = () => { if (imgs.get(t.id) === i) imgs.delete(t.id); };
+  i.src = t.img;
 }
 $('#imgFile').addEventListener('change', e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f || pendingImg == null) return;
@@ -1509,7 +1572,10 @@ function kickPlayer(clientId) {
   if (role !== 'gm') return;
   const member = roster.find(r => r.clientId === clientId); if (!member) return;
   roster = roster.filter(r => r.clientId !== clientId);
-  if (member.tokenId) { const t = tokenById(member.tokenId); if (t) t.name = 'Player'; }
+  if (member.tokenId) {
+    const t = tokenById(member.tokenId);
+    if (t && !FIXED_PLAYER_NAMES.has(t.name)) t.name = 'Player';
+  }
   if (net) net.notify(clientId, 'You were removed from the table by the GM.');
   logEvent(`${member.name} was removed from the table.`);
   changed();
