@@ -2125,6 +2125,32 @@ function removeToken(id) {
   if (turn.activeId === id) { turn.activeId = null; turn.moved = {}; turn.attacked = {}; }
   changed();
 }
+function clearAllHostiles() {
+  if (role !== 'gm' || !map) return;
+  const doomed = tokens.filter(t => t.layer === 'gm');
+  if (!doomed.length) { showMsg('There are no hostiles to clear.'); return; }
+  if (!confirm(`Remove all ${doomed.length} hostile token${doomed.length === 1 ? '' : 's'}?`)) return;
+  const ids = new Set(doomed.map(t => t.id));
+  tokens = tokens.filter(t => t.layer !== 'gm');
+  for (const id of ids) { imgs.delete(id); openStats.delete(id); }
+  for (const [id, entry] of [...pendingPlayerAttacks]) {
+    if (!ids.has(entry.targetId)) continue;
+    pendingPlayerAttacks.delete(id);
+    net && net.notify(entry.clientId, 'Your queued attack was cancelled: the target was removed.');
+  }
+  for (const [id, entry] of [...pendingDefense]) {
+    if (!ids.has(entry.attackerId)) continue;
+    clearTimeout(entry.timer);
+    pendingDefense.delete(id);
+    net && net.notify(entry.clientId, 'The incoming attack was cancelled: the attacker was removed.', { kind: 'defenseCancel', requestId: id });
+  }
+  if (ids.has(selected)) selected = null;
+  if (ids.has(turn.activeId)) { turn.activeId = null; turn.moved = {}; turn.attacked = {}; }
+  if (hoverTok && ids.has(hoverTok.id)) hoverTok = null;
+  logEvent(`GM clears ${ids.size} hostile token${ids.size === 1 ? '' : 's'}.`);
+  changed();
+  showMsg(`Cleared ${ids.size} hostile token${ids.size === 1 ? '' : 's'}.`);
+}
 function addToken(layer) {
   if (!map || role !== 'gm') return;
   if (layer === 'player' && tokens.filter(t => t.layer === 'player').length >= MAX_PLAYERS) { showMsg('The table is set for up to ' + MAX_PLAYERS + ' player tokens.'); return; }
@@ -2137,6 +2163,7 @@ function addToken(layer) {
   snapTok(t); tokens.push(t); selected = t.id; $('#newName').value = ''; changed();
 }
 $('#addPlayer').onclick = () => addToken('player'); $('#addGm').onclick = () => addToken('gm');
+$('#clearHostiles').onclick = clearAllHostiles;
 
 function renderSheet() {
   const sec = $('#sheetSec');

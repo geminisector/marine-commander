@@ -84,7 +84,8 @@ security, because the password ships in the static client.
    everyone alive. Set a per-turn movement limit if you want one.
 6. Click a door to open/close it, click a bulb to cycle its light, drag tokens
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
-   the table log. Player door requests appear in the log.
+   the table log. **Clear all hostiles** in the Tokens section removes every GM
+   token at once. Player door requests appear in the log.
 7. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
 
