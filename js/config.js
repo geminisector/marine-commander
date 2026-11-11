@@ -47,9 +47,9 @@ window.MC_CONFIG = {
         {
           id: 'ladder-up',
           name: 'Central ladder · up',
-          x: 19.5, y: 20,
+          x: 13.5, y: 20,
           to: 'dorkathi_top',
-          tx: 19.5, ty: 20
+          tx: 13.5, ty: 20
         }
       ]
     },
@@ -65,9 +65,9 @@ window.MC_CONFIG = {
         {
           id: 'ladder-down',
           name: 'Central ladder · down',
-          x: 19.5, y: 20,
+          x: 13.5, y: 20,
           to: 'dorkathi_bottom',
-          tx: 19.5, ty: 20
+          tx: 13.5, ty: 20
         }
       ]
     }
