@@ -219,7 +219,7 @@ class LiveSession {
     } else if (topic === this.topics.notice) {
       if (this.role !== 'player') return;
       unseal(this.key, text).then(obj => {
-        if (!this._closed && obj && typeof obj.text === 'string') this.onNotice(obj.text);
+        if (!this._closed && obj && typeof obj.text === 'string') this.onNotice(obj.text, obj.data || null);
       }).catch(() => {});
     }
   }
@@ -265,9 +265,9 @@ class LiveSession {
       }));
   }
 
-  notify(clientId, text) {
+  notify(clientId, text, data = null) {
     if (this.role !== 'host' || !this.client || !this.key) return;
-    seal(this.key, { v: 1, text: String(text).slice(0, 300) })
+    seal(this.key, { v: 1, text: String(text).slice(0, 300), data })
       .then(payload => {
         this.client.publish(`${this.base}/n/${clientId}`, payload, { qos: 1 });
       }).catch(() => {});

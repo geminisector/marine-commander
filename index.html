@@ -223,19 +223,42 @@
     <button type="button" data-move="grapple"><b>Grapple</b><span>beats counter</span></button>
     <button type="button" data-move="counter"><b>Counter</b><span>beats strike</span></button>
   </div>
-  <label class="field" id="combatReactWrap">Defender reaction
-    <select id="combatReact">
-      <option value="auto">Enemy AI · random reaction</option>
-      <option value="strike">Strike</option>
-      <option value="grapple">Grapple</option>
-      <option value="counter">Counter</option>
-    </select>
-  </label>
+  <div class="field" id="combatReactWrap">
+    <span>Defender reaction</span>
+    <span id="combatReactInfo" class="sub"></span>
+  </div>
   <div id="combatResult" class="combatresult" hidden></div>
   <div class="row dlgactions">
     <button class="btn primary" id="combatGo" type="button">Attack</button>
     <button class="btn" id="combatCancel" type="button">Cancel</button>
   </div>
+</dialog>
+
+<dialog id="defenseDlg" class="dlg" aria-labelledby="defenseTitle">
+  <div class="dlghead">
+    <div><div class="kicker">INCOMING ATTACK</div><h2 id="defenseTitle">Choose your stance</h2></div>
+    <button class="btn tiny" id="defenseClose" type="button">Close</button>
+  </div>
+  <div class="combatwho">
+    <div class="combatcard">
+      <span class="mono muted">ATTACKER</span>
+      <strong id="defenseAttackerName">—</strong>
+      <span id="defenseAttackerStats" class="mono muted"></span>
+    </div>
+    <div class="combatcard">
+      <span class="mono muted">DEFENDING</span>
+      <strong id="defenseTargetName">—</strong>
+      <span id="defenseTargetStats" class="mono muted"></span>
+    </div>
+  </div>
+  <div id="defenseRange" class="sub"></div>
+  <div class="moveselect" id="defenseMoves" role="group" aria-label="Defence stance">
+    <button type="button" data-def-move="strike"><b>Strike</b><span>beats grapple</span></button>
+    <button type="button" data-def-move="grapple"><b>Grapple</b><span>beats counter</span></button>
+    <button type="button" data-def-move="counter"><b>Counter</b><span>beats strike</span></button>
+  </div>
+  <div id="defenseNote" class="sub">The GM is waiting for your choice. If you close this, a random stance is used after a short delay.</div>
+  <div id="defenseResult" class="combatresult" hidden></div>
 </dialog>
 
 <script src="vendor/mqtt.min.js"></script>

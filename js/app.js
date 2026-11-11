@@ -57,6 +57,9 @@ let anim = null;                    // unused animation slot kept for scene rese
 let syncTimer = 0, saveTimer = 0, msgTimer = 0;
 let pendingImg = null;
 let combatCtx = null, combatChosenMove = 'strike';
+const pendingDefense = new Map();    // host: requestId -> { clientId, attackerId, targetId, move, timer }
+let incomingDefense = null;          // player: { requestId, move }
+const DEFENSE_TIMEOUT_MS = 30000;
 const openStats = new Set();
 let busy = false;
 
@@ -1386,13 +1389,20 @@ function updateCombatDialog() {
   $('#combatRange').textContent = reach.text + (reach.ok ? '' : ' — move closer or use a ranged weapon');
   $('#combatRange').dataset.ok = reach.ok ? 'yes' : 'no';
   $$('#combatMoves [data-move]').forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.move === combatChosenMove ? 'true' : 'false'));
-  const react = $('#combatReact');
-  const forcedAuto = role === 'player' || b.layer === 'gm';
-  react.disabled = forcedAuto;
-  if (forcedAuto) react.value = 'auto';
-  $('#combatReactWrap').title = forcedAuto ? 'Hostile reactions are always chosen by enemy AI.' : "The GM may choose the player defender's reaction or let the enemy AI roll.";
+  const reactInfo = $('#combatReactInfo');
+  if (b.layer === 'gm') reactInfo.textContent = 'Enemy AI · the hostile picks a random stance.';
+  else if (role === 'player') reactInfo.textContent = 'The GM controls this defender.';
+  else {
+    const owner = controllerOf(b.id);
+    reactInfo.textContent = owner && owner.online
+      ? `${owner.name} will be asked to choose their stance.`
+      : 'No player is online for this character · random stance.';
+  }
   $('#combatGo').disabled = !reach.ok || isDown(b);
   $('#combatGo').textContent = role === 'player' ? 'Send attack' : 'Attack';
+}
+function controllerOf(tokenId) {
+  return roster.find(r => r.tokenId === tokenId) || null;
 }
 function closeCombat() {
   const dlg = $('#combatDlg');
@@ -1513,19 +1523,110 @@ function submitCombat() {
     showMsg('Attack sent to the GM.');
     return;
   }
-  const reaction = $('#combatReact').disabled ? 'auto' : $('#combatReact').value;
-  const result = performAttack(a.id, b.id, move, reaction);
+  if (b.layer === 'player' && requestPlayerDefense(a, b, move)) { closeCombat(); return; }
+  const result = performAttack(a.id, b.id, move, 'auto');
   if (result.error) {
     const box = $('#combatResult'); box.hidden = false; box.textContent = result.error;
     return;
   }
   closeCombat();
 }
+function requestPlayerDefense(a, b, move) {
+  const owner = controllerOf(b.id);
+  if (!owner || !owner.online || owner.clientId === me.clientId || !net) return false;
+  const requestId = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const entry = { requestId, clientId: owner.clientId, attackerId: a.id, targetId: b.id, move, timer: 0 };
+  entry.timer = setTimeout(() => {
+    if (!pendingDefense.has(requestId)) return;
+    pendingDefense.delete(requestId);
+    net && net.notify(owner.clientId, 'No stance chosen in time — the enemy AI rolled for you.', { kind: 'defenseCancel', requestId });
+    const result = performAttack(entry.attackerId, entry.targetId, entry.move, 'auto');
+    if (result.error) { showMsg(result.error); scheduleSync(); }
+    else { logEvent(`${owner.name} did not answer in time; ${b.name}'s reaction was rolled randomly.`); changed(); }
+  }, DEFENSE_TIMEOUT_MS);
+  pendingDefense.set(requestId, entry);
+  net.notify(owner.clientId, `Incoming attack from ${a.name}`, {
+    kind: 'defenseRequest', requestId,
+    attackerId: a.id, targetId: b.id, move,
+    timeoutMs: DEFENSE_TIMEOUT_MS
+  });
+  showMsg(`Waiting for ${owner.name} to choose a stance…`);
+  return true;
+}
+function resolvePlayerDefense(requestId, move) {
+  const entry = pendingDefense.get(requestId);
+  if (!entry || !MOVE_LABEL[move]) return false;
+  clearTimeout(entry.timer);
+  pendingDefense.delete(requestId);
+  const result = performAttack(entry.attackerId, entry.targetId, entry.move, move);
+  if (result.error) { showMsg(result.error); scheduleSync(); return true; }
+  net && net.notify(entry.clientId, 'Stance accepted: ' + MOVE_LABEL[move] + '.', { kind: 'defenseResolved', requestId });
+  return true;
+}
+function clearDefenseRequests() {
+  for (const entry of pendingDefense.values()) {
+    clearTimeout(entry.timer);
+    net && net.notify(entry.clientId, 'The GM cancelled the attack.', { kind: 'defenseCancel', requestId: entry.requestId });
+  }
+  pendingDefense.clear();
+}
 $('#combatGo').onclick = submitCombat;
 $('#combatClose').onclick = closeCombat;
 $('#combatCancel').onclick = closeCombat;
 $('#combatDlg').addEventListener('cancel', e => { e.preventDefault(); closeCombat(); });
 $('#combatDlg').addEventListener('click', e => { if (e.target === $('#combatDlg')) closeCombat(); });
+
+function showDefenseRequest(data) {
+  if (!data || !data.requestId || !MOVE_LABEL[data.move]) return;
+  const a = tokenById(data.attackerId), b = tokenById(data.targetId);
+  if (!a || !b || b.id !== me.tokenId) return;
+  incomingDefense = { requestId: data.requestId, move: data.move };
+  $('#defenseAttackerName').textContent = a.name;
+  const aw = weaponOf(a), ad = computeStats(a.stats);
+  $('#defenseAttackerStats').textContent = `${aw.label} · ${aw.type} · ${MOVE_LABEL[data.move]}`;
+  $('#defenseTargetName').textContent = b.name;
+  const bw = weaponOf(b), bd = computeStats(b.stats);
+  $('#defenseTargetStats').textContent = `HP ${b.hp}/${b.maxHp} · ${bw.label} · DMG ${bd.damage} ×${bw.damage}`;
+  $('#defenseRange').textContent = combatReach(a, b).text;
+  $('#defenseResult').hidden = true;
+  $('#defenseResult').textContent = '';
+  $$('#defenseMoves [data-def-move]').forEach(btn => { btn.disabled = false; });
+  const dlg = $('#defenseDlg');
+  if (!dlg.open) dlg.showModal();
+}
+function closeDefense() {
+  const dlg = $('#defenseDlg');
+  if (dlg.open) dlg.close();
+}
+function sendDefense(move) {
+  if (!incomingDefense || !MOVE_LABEL[move]) return;
+  if (sessionRole !== 'player' || !net) { showMsg('Not connected.'); return; }
+  if (!hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+  net.sendAction({ type: 'defend', requestId: incomingDefense.requestId, move })
+    .catch(() => showMsg('Could not send your stance.'));
+  $$('#defenseMoves [data-def-move]').forEach(btn => { btn.disabled = true; });
+  $('#defenseResult').hidden = false;
+  $('#defenseResult').textContent = 'Stance sent to the GM: ' + MOVE_LABEL[move] + '.';
+  setTimeout(closeDefense, 900);
+}
+$$('#defenseMoves [data-def-move]').forEach(btn => { btn.onclick = () => sendDefense(btn.dataset.defMove); });
+$('#defenseClose').onclick = closeDefense;
+$('#defenseDlg').addEventListener('cancel', e => { e.preventDefault(); closeDefense(); });
+$('#defenseDlg').addEventListener('click', e => { if (e.target === $('#defenseDlg')) closeDefense(); });
+
+function handleNotice(text, data) {
+  if (data && data.kind === 'defenseRequest') { showDefenseRequest(data); return; }
+  if (data && data.kind === 'defenseCancel') {
+    if (incomingDefense && incomingDefense.requestId === data.requestId) { incomingDefense = null; closeDefense(); }
+    showMsg(text);
+    return;
+  }
+  if (data && data.kind === 'defenseResolved') {
+    if (incomingDefense && incomingDefense.requestId === data.requestId) { incomingDefense = null; closeDefense(); }
+    return;
+  }
+  showMsg(text);
+}
 function hpBlock(t, canEdit, canEditMax) {
   const wrap = document.createElement('div'); wrap.className = 'hpwrap';
   const r = document.createElement('div'); r.className = 'l2 hprow';
@@ -1978,6 +2079,13 @@ async function handleAction(msg) {
       if (text) { logEvent(`${member.name}: ${text}`, 'chat'); changed(); }
       return;
     }
+    case 'defend': {
+      const entry = pendingDefense.get(String(action.requestId || ''));
+      if (!entry || entry.clientId !== clientId) { net.notify(clientId, 'That defence request is no longer active.'); return; }
+      if (!MOVE_LABEL[action.move]) { net.notify(clientId, 'Choose Strike, Grapple or Counter.'); return; }
+      resolvePlayerDefense(entry.requestId, action.move);
+      return;
+    }
     case 'useStair': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use a stair with your own character.'); return; }
       if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
@@ -2128,6 +2236,8 @@ function leaveSession() {
   if (busy) return;
   if (sessionRole === 'host' && !confirm('End this live session? Players will be disconnected.')) return;
   busy = true;
+  clearDefenseRequests();
+  incomingDefense = null; closeDefense();
   try { if (net) net.disconnect(); } catch (e) {}
   net = null; sessionRole = 'solo'; role = 'gm'; roomCode = ''; roster = []; hostOnline = true; netState = 'live';
   $('#conn').hidden = true;
@@ -2212,7 +2322,7 @@ async function startPlayer(code) {
     net = new LiveSession({
       role: 'player', room: roomKeyOf(room), clientId: me.clientId, name,
       onState: s => applySnapshot(s), onMeta: handleMeta, onAction: () => {},
-      onNotice: text => showMsg(text), onStatus: handleNetStatus
+      onNotice: handleNotice, onStatus: handleNetStatus
     });
     await net.connect();
     const meta = await net.waitForMeta(6500);
