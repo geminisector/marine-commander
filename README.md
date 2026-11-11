@@ -82,6 +82,23 @@ window.MC_CONFIG = {
 7. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
 
+### Setup phase
+
+Every new session starts in **Setup** mode. Players can join and be assigned
+characters while the GM prepares the table, but they cannot move, attack or use
+stairs yet. The Map selector chooses the deck being prepared.
+
+- Pick a unit in the **Setup** section and press **Place on this deck** to move
+  it from another deck to the current one. Drag it to its spawn square.
+- **Move players here** moves every player character from other decks onto the
+  current deck in a loose formation, ready to be dragged into position.
+- New generic units still come from **Tokens → Add player token / Add hostile**;
+  they spawn on the current deck.
+- The updated Cortez placements in `defaultTokens()` remain the default whenever
+  the Cortez scene is reset or a new table starts.
+- Press **Begin mission** when ready. This starts the mission log; setup moves
+  and placement are not counted as part of the mission.
+
 ### Mission reports
 
 When the mission is over, the GM presses **End mission & download log** in the

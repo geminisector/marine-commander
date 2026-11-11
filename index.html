@@ -105,6 +105,22 @@
       <div id="sheetBody"></div>
     </section>
 
+    <section class="sec gm-only" id="setupSec">
+      <h2>Setup</h2>
+      <div id="setupNote" class="sub"></div>
+      <div class="field"><label for="setupToken">Unit</label>
+        <select id="setupToken" aria-label="Unit to place on the current deck"></select>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="placeUnit" type="button">Place on this deck</button>
+        <button class="btn" id="placeParty" type="button">Move players here</button>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="beginMission" type="button">Begin mission</button>
+      </div>
+      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Create extra units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section.</div>
+    </section>
+
     <section class="sec gm-only" id="turnSec">
       <h2>Turns</h2>
       <div class="row">

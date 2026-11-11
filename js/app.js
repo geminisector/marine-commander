@@ -58,6 +58,7 @@ let needDraw = true, lightDirty = true, fogDirty = true;
 
 let sessionRole = 'solo';           // solo | host | player
 let role = 'gm';                    // gm | player
+let setupPhase = false;
 let net = null, roomCode = '', hostName = '', hostOnline = true, netState = 'live';
 let me = { clientId: getClientId(), name: '', tokenId: null };
 let roster = [], logRows = [], rev = 0;
@@ -560,31 +561,31 @@ function defaultTokens() {
   const hero = (name, color, x, y, stats, weapon, img, inv) =>
     mk('player', name, color, x, y, 1, stats, weapon, HUMANS + img, inv);
   return [
-    hero("Leni 'Killmeister' Henari", '#3cc4b1', 552, 300,
+    hero("Leni 'Killmeister' Henari", '#3cc4b1', 700, 300,
       { melee: 11, martialArts: 0, dance: 7, athletic: 11 }, 'laser_rifle', 'killmeister.webp',
       [{ name: 'Combat knife', qty: 1 }, { name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Frag grenade', qty: 1 }]),
-    hero("Keyan 'Enforcer' Steele", '#6aa6ff', 552, 322,
+    hero("Keyan 'Enforcer' Steele", '#6aa6ff', 680, 311,
       { melee: 6, martialArts: 0, dance: 0, athletic: 6 }, 'laser_rifle', 'enforcer-head.png',
       [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
-    hero("Cyric 'Talon' Karde", '#f2a93b', 586, 300,
+    hero("Cyric 'Talon' Karde", '#f2a93b', 660, 300,
       { melee: 0, martialArts: 7, dance: 0, athletic: 5 }, 'laser_rifle', 'talon.jpg',
       [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
-    hero("Derek 'Tinman' Miles", '#c58bff', 586, 322,
+    hero("Derek 'Tinman' Miles", '#c58bff', 680, 280,
       { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, 'laser_rifle', 'tinman.webp',
       [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]),
 
-    hostile('Pilot', 1, '#e5604f', 41, 14, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
-    hostile('Pilot', 2, '#e5604f', 45, 14, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
-    hostile('Pilot', 3, '#e5604f', 42, 24, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
-    hostile('Pilot', 4, '#e5604f', 49, 23, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 1, '#e5604f', 40, 11, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 2, '#e5604f', 37, 14, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 3, '#e5604f', 27, 21, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 4, '#e5604f', 49, 28, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
 
-    hostile('Grunt', 1, '#c0392b', 42, 20, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
-    hostile('Grunt', 2, '#c0392b', 48, 20, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
+    hostile('Grunt', 1, '#c0392b', 37, 25, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
+    hostile('Grunt', 2, '#c0392b', 52, 20, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
 
     hostile('Navigator', 1, '#ef7d4f', 11, 19, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
-    hostile('Navigator', 2, '#ef7d4f', 25, 19, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
+    hostile('Navigator', 2, '#ef7d4f', 14, 20, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
 
-    hostile('Medic', 0, '#d9534f', 38, 20, { melee: 3, martialArts: 4, dance: 0, athletic: 4 }, 'stunrod', 'medic.png', [{ name: 'Medkit', qty: 2 }]),
+    hostile('Medic', 0, '#d9534f', 21, 21, { melee: 3, martialArts: 4, dance: 0, athletic: 4 }, 'stunrod', 'medic.png', [{ name: 'Medkit', qty: 2 }]),
     hostile('Engineer', 0, '#a93226', 53, 20, { melee: 6, martialArts: 2, dance: 0, athletic: 5 }, 'club', 'engineer.png', [{ name: 'Tool kit', qty: 1 }, { name: 'Frag grenade', qty: 1 }])
   ];
 }
@@ -742,6 +743,7 @@ async function useStair(t, st) {
 }
 function clickStair(st) {
   if (!st) return;
+  if (setupPhase && role === 'player') { showMsg('The GM is setting up the mission.'); return; }
   if (role === 'gm') {
     const t = tokenById(selected);
     if (t && onLevel(t)) useStair(t, st);
@@ -762,6 +764,7 @@ function makeSnapshot() {
   rev++;
   return {
     v: 2, rev, ts: Date.now(), host: hostName || me.name || 'GM', mapKey: map ? map.key : DEFAULT_MAP_ID,
+    setup: setupPhase,
     turn: { number: turn.number, activeId: turn.activeId, moved: Object.assign({}, turn.moved), attacked: Object.assign({}, turn.attacked) },
     tokens: tokens.map(cleanToken),
     doors: map ? map.doors.map(d => d.open) : [],
@@ -819,6 +822,7 @@ function applySnapshot(s, initial = false) {
   }
   rev = s.rev;
   hostName = s.host || hostName;
+  setupPhase = !!s.setup;
   tokens = (s.tokens || []).map(t => Object.assign(cleanToken(t), { plan: undefined }));
   nextId = Math.max(0, ...tokens.map(t => t.id)) + 1;
   syncTokenImages();
@@ -1150,6 +1154,7 @@ $('#file').addEventListener('change', e => { const f = e.target.files[0]; if (f)
 function setHint(extra) {
   const base = role === 'player'
     ? (tool === 'ruler' ? 'Drag to measure. Esc clears.'
+      : setupPhase ? 'The GM is setting up the mission.'
       : !me.tokenId ? 'Waiting for the GM to assign you a character.'
       : settings.turnBased && turn.activeId !== me.tokenId ? 'Waiting for your turn. You can still measure and inspect the map.'
       : 'Drag your token to move. Click a door to ask the GM to open it. Wheel to zoom.')
@@ -1166,6 +1171,9 @@ $('#zOut').onclick = () => zoomAt(0.8, cv.clientWidth / 2, cv.clientHeight / 2);
 $('#btnFit').onclick = fitView;
 $('#mapSelect').onchange = e => selectMap(e.target.value);
 $('#btnEndMission').onclick = endMission;
+$('#placeUnit').onclick = placeSetupUnit;
+$('#placeParty').onclick = movePlayersToDeck;
+$('#beginMission').onclick = beginMission;
 
 /* ---------- panel wiring ---------- */
 $$('.lrow[data-layer]').forEach(row => {
@@ -1228,7 +1236,89 @@ $('#btnReset').onclick = e => {
 function markSel() { $$('.trow').forEach(r => r.classList.toggle('sel', +r.dataset.id === selected)); }
 function renderAll() {
   if (!map) return;
-  renderTokens(); renderRoster(); renderSheet(); renderTurnOrder(); renderPendingAttacks(); renderLog(); updateTurnUI(); updateDoorCount(); setHint(null); invalidate();
+  renderSetup(); renderTokens(); renderRoster(); renderSheet(); renderTurnOrder(); renderPendingAttacks(); renderLog(); updateTurnUI(); updateDoorCount(); setHint(null); invalidate();
+}
+function viewCenterWorld() {
+  const r = cv.getBoundingClientRect();
+  return {
+    x: Math.max(map.ppg, Math.min(map.W - map.ppg, (r.width / 2 - view.x) / view.k)),
+    y: Math.max(map.ppg, Math.min(map.H - map.ppg, (r.height / 2 - view.y) / view.k))
+  };
+}
+function renderSetup() {
+  const sel = $('#setupToken');
+  if (!sel || !map) return;
+  const previous = sel.value;
+  sel.textContent = '';
+  const addGroup = (label, list) => {
+    if (!list.length) return;
+    const group = document.createElement('optgroup');
+    group.label = label;
+    for (const t of list) {
+      const o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = `${t.name} · ${mapLabel(MAP_BY_ID.get(t.mapKey))}`;
+      group.append(o);
+    }
+    sel.append(group);
+  };
+  addGroup('Player characters', tokens.filter(t => t.layer === 'player'));
+  addGroup('Hostiles', tokens.filter(t => t.layer !== 'player'));
+  if (previous && [...sel.options].some(o => o.value === previous)) sel.value = previous;
+  else if (sel.options.length) sel.value = sel.options[0].value;
+  sel.disabled = !sel.options.length;
+  const note = $('#setupNote');
+  if (note) note.textContent = setupPhase
+    ? 'Setup phase — place the party and hostiles, then begin the mission.'
+    : 'Mission in progress. The GM can still move units between decks from here.';
+  const begin = $('#beginMission');
+  if (begin) begin.hidden = !setupPhase;
+  const place = $('#placeUnit');
+  if (place) place.disabled = !sel.value;
+}
+function placeSetupUnit() {
+  if (!isHost() || !map) return;
+  const id = +$('#setupToken').value;
+  const t = tokenById(id);
+  if (!t) return;
+  if (t.mapKey !== map.key) {
+    const c = viewCenterWorld();
+    t.mapKey = map.key;
+    t.x = c.x; t.y = c.y;
+    snapTok(t);
+    logEvent(`GM places ${t.name} on ${map.name}.`);
+  }
+  selected = t.id;
+  changed();
+  showMsg(`${t.name} is on ${map.name}. Drag it to its spawn square.`);
+}
+function movePlayersToDeck() {
+  if (!isHost() || !map) return;
+  const players = tokens.filter(t => t.layer === 'player');
+  const moving = players.filter(t => t.mapKey !== map.key);
+  if (!moving.length) { showMsg('All player characters are already on this deck.'); return; }
+  const c = viewCenterWorld();
+  const gap = map.ppg * 1.25;
+  const offsets = [[-1, -1], [1, -1], [-1, 1], [1, 1], [-2, 0], [2, 0], [0, -2], [0, 2]];
+  moving.forEach((t, i) => {
+    const [ox, oy] = offsets[i % offsets.length];
+    t.mapKey = map.key;
+    t.x = Math.max(map.ppg, Math.min(map.W - map.ppg, c.x + ox * gap));
+    t.y = Math.max(map.ppg, Math.min(map.H - map.ppg, c.y + oy * gap));
+    snapTok(t);
+  });
+  logEvent(`GM moves ${moving.length} player character${moving.length === 1 ? '' : 's'} to ${map.name}.`);
+  changed();
+  showMsg(`Player characters moved to ${map.name}. Drag them into their spawn positions.`);
+}
+function beginMission() {
+  if (!isHost() || !setupPhase) return;
+  setupPhase = false;
+  resetMission();
+  if (map) mission.maps.add(map.key);
+  logEvent('Setup complete. Mission begins.');
+  changed();
+  showMsg('Mission started.');
 }
 function renderTokens() {
   for (const [layer, id] of [['player', '#rowsPlayer'], ['gm', '#rowsGm']]) {
@@ -1323,6 +1413,7 @@ function pendingAttackFor(tokenId) {
 }
 function attackBlockedReason(t) {
   if (!t || !map) return 'No map loaded';
+  if (setupPhase) return 'Setup phase — begin the mission first';
   if (isDown(t)) return t.name + ' is down';
   if (role === 'player' && t.id !== me.tokenId) return 'Not your character';
   if (pendingAttackFor(t.id)) return t.name + "'s attack is waiting for the GM";
@@ -2075,6 +2166,7 @@ function renderTurnOrder() {
 }
 function assignTurn(tokenId) {
   if (role !== 'gm') return;
+  if (setupPhase) { showMsg('Begin the mission before assigning turns.'); return; }
   const t = tokenById(tokenId); if (!t) return;
   turn.number++; turn.activeId = tokenId; turn.moved = {}; turn.attacked = {}; selected = tokenId;
   logEvent(`Turn ${turn.number}: ${t.name}.`);
@@ -2083,6 +2175,7 @@ function assignTurn(tokenId) {
 }
 function nextTurn(dir) {
   if (role !== 'gm' || !settings.turnBased) return;
+  if (setupPhase) { showMsg('Begin the mission before assigning turns.'); return; }
   const alive = tokens.filter(t => !isDown(t));
   if (!alive.length) { showMsg('There is no one left to take a turn.'); return; }
   let idx = alive.findIndex(t => t.id === turn.activeId);
@@ -2318,6 +2411,7 @@ function downloadMissionReport() {
 }
 function endMission() {
   if (!isHost()) return;
+  if (setupPhase) { showMsg('Begin the mission before ending it.'); return; }
   if (!confirm('End this mission and download the combat log?')) return;
   mission.endedAt = Date.now();
   logEvent('Mission ended. Combat log downloaded.');
@@ -2330,6 +2424,15 @@ function updateTurnUI() {
   const turnHost = role === 'gm';
   const pill = $('#turnPill'), phase = $('#phasePill');
   let label = '', cls = 'player';
+  if (setupPhase) {
+    label = turnHost ? 'Setup phase' : 'GM is setting up';
+    pill.hidden = true; pill.textContent = label; pill.dataset.kind = 'gm';
+    phase.hidden = false; phase.textContent = label; phase.dataset.phase = 'gm';
+    $('#turnInfo').textContent = 'Setup';
+    $('#endTurn').hidden = true;
+    setHint(null);
+    return;
+  }
   if (!settings.turnBased) { label = 'Free move'; cls = 'player'; }
   else if (!active) { label = turnHost ? 'Assign a turn' : 'Waiting for the GM'; cls = 'gm'; }
   else if (turnHost) { label = `${active.name}'s turn`; cls = active.layer === 'gm' ? 'gm' : 'player'; }
@@ -2458,6 +2561,7 @@ async function handleAction(msg) {
     }
     case 'useStair': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use a stair with your own character.'); return; }
+      if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
       if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
       const from = own.mapKey || map.key;
       const st = stairsFor(from).find(s => s.id === action.stairId);
@@ -2473,6 +2577,7 @@ async function handleAction(msg) {
     }
     case 'move': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only move your own character.'); return; }
+      if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
       if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
       if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
       const targetX = +action.x, targetY = +action.y;
@@ -2515,6 +2620,7 @@ async function handleAction(msg) {
     }
     case 'attack': {
       if (!own || +action.attackerId !== own.id) { net.notify(clientId, 'You can only attack with your own character.'); return; }
+      if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
       const target = tokenById(+action.targetId);
       if (!target || target.layer !== 'gm') { net.notify(clientId, 'Choose a hostile target.'); return; }
       if (!MOVE_LABEL[action.move]) { net.notify(clientId, 'Choose Strike, Grapple or Counter.'); return; }
@@ -2667,7 +2773,7 @@ async function startHost(resume) {
   setBusy(true, 'Opening a live session…');
   try {
     await ensureMap();
-    if (!resume) { resetToDefaults(); rev = 0; }
+    if (!resume) { resetToDefaults(); rev = 0; setupPhase = true; }
     sessionRole = 'host'; role = 'gm'; me.name = name; hostName = name; netState = 'live';
     roomCode = resume ? normalizeRoom(resume.room) : makeRoomCode();
     if (resume) {
@@ -2736,7 +2842,7 @@ async function startSolo() {
   setBusy(true, 'Opening the table…');
   try {
     await ensureMap();
-    resetToDefaults(); rev = 0;
+    resetToDefaults(); rev = 0; setupPhase = true;
     sessionRole = 'solo'; role = 'gm'; me.name = name; hostName = name; roomCode = '';
     const restored = await loadSoloSave();
     if (!restored) logEvent('Solo session started. You are the GM.');
@@ -2788,7 +2894,7 @@ const bootMapPromise = loadDefaultMap().catch(err => {
 });
 window.__marineCommander = {
   get map() { return map; }, get tokens() { return tokens; }, get settings() { return settings; },
-  get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; },
+  get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; }, get setupPhase() { return setupPhase; },
   get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
   get mission() { return mission; }, buildMissionReport,
   selectMap, useStair, changed
