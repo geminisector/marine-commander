@@ -115,10 +115,23 @@
         <button class="btn primary" id="placeUnit" type="button">Place on this deck</button>
         <button class="btn" id="placeParty" type="button">Move players here</button>
       </div>
+      <div class="field"><label for="spawnRole">Spawn enemies</label>
+        <div class="row">
+          <select id="spawnRole" aria-label="Enemy role">
+            <option value="Pilot">Pilot</option>
+            <option value="Grunt">Grunt</option>
+            <option value="Navigator">Navigator</option>
+            <option value="Medic">Medic</option>
+            <option value="Engineer">Engineer</option>
+          </select>
+          <input id="spawnCount" type="number" min="1" max="50" step="1" value="2" style="width:64px" aria-label="Number of enemies to spawn">
+          <button class="btn tiny" id="spawnEnemies" type="button">Spawn</button>
+        </div>
+      </div>
       <div class="row">
         <button class="btn primary" id="beginMission" type="button">Begin mission</button>
       </div>
-      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Create extra units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section.</div>
+      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Spawn preset enemies above, or create custom units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section.</div>
     </section>
 
     <section class="sec gm-only" id="turnSec">

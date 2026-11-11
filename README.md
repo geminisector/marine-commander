@@ -92,6 +92,9 @@ stairs yet. The Map selector chooses the deck being prepared.
   it from another deck to the current one. Drag it to its spawn square.
 - **Move players here** moves every player character from other decks onto the
   current deck in a loose formation, ready to be dragged into position.
+- **Spawn enemies** creates any number of preset Pilots, Grunts, Navigators,
+  Medics or Engineers on the current deck, numbered automatically (for example
+  `Pilot 5`, `Pilot 6`, `Grunt 3`).
 - New generic units still come from **Tokens → Add player token / Add hostile**;
   they spawn on the current deck.
 - The updated Cortez placements in `defaultTokens()` remain the default whenever

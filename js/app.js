@@ -158,6 +158,16 @@ const WEAPONS = Object.freeze({
 });
 const UNARMED = Object.freeze({ label: 'Unarmed', damage: 1, suckerDamage: 1.5, sucker: 'sucker-punched', verbs: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], type: 'melee' });
 const WEAPON_KEYS = Object.keys(WEAPONS);
+const HUMAN_TOKENS = 'assets/tokens/human/';
+const HOSTILE_PRESETS = Object.freeze({
+  Pilot:    { color: '#e5604f', stats: { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, weapon: 'laser',   img: 'pilot.png',     inv: [{ name: 'Laser cell', qty: 2 }] },
+  Grunt:    { color: '#c0392b', stats: { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, weapon: 'rifle',   img: 'grunt.png',     inv: [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }] },
+  Navigator:{ color: '#ef7d4f', stats: { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, weapon: 'knife',   img: 'navigator.png', inv: [{ name: 'Datapad', qty: 1 }] },
+  Medic:    { color: '#d9534f', stats: { melee: 3, martialArts: 4, dance: 0, athletic: 4 }, weapon: 'stunrod', img: 'medic.png',     inv: [{ name: 'Medkit', qty: 2 }] },
+  Engineer: { color: '#a93226', stats: { melee: 6, martialArts: 2, dance: 0, athletic: 5 }, weapon: 'club',    img: 'engineer.png',  inv: [{ name: 'Tool kit', qty: 1 }, { name: 'Frag grenade', qty: 1 }] }
+});
+const HOSTILE_ROLES = Object.keys(HOSTILE_PRESETS);
+const cloneInventory = inv => (inv || []).map(x => ({ name: x.name, qty: x.qty }));
 const MOVES = { strike: 'grapple', grapple: 'counter', counter: 'strike' };
 const WIN_MOVES = { strike: 'counter', grapple: 'strike', counter: 'grapple' };
 const MOVE_LABEL = { strike: 'Strike', grapple: 'Grapple', counter: 'Counter' };
@@ -550,16 +560,17 @@ function defaultTokens() {
   };
   // Pixel centre of a map square (the scene is 64 x 39.25 squares at 16 px each).
   const sq = (col, row) => [(col + 0.5) * (map ? map.ppg : 16), (row + 0.5) * (map ? map.ppg : 16)];
-  const HUMANS = 'assets/tokens/human/';
   // Hostile boarding party: 4 pilots, 2 grunts, 2 navigators, 1 medic, 1 engineer.
   // The token images are referenced by path (not embedded), so saved layouts stay small.
-  const hostile = (role, n, color, col, row, stats, weapon, img, inv) => {
+  const hostile = (role, n, col, row) => {
+    const preset = HOSTILE_PRESETS[role];
     const [x, y] = sq(col, row);
-    return mk('gm', role + (n ? ' ' + n : ''), color, x, y, 1, stats, weapon, HUMANS + img, inv);
+    return mk('gm', role + (n ? ' ' + n : ''), preset.color, x, y, 1, preset.stats,
+      preset.weapon, HUMAN_TOKENS + preset.img, cloneInventory(preset.inv));
   };
   // The four heroes are fixed characters: their names survive a player taking the seat.
   const hero = (name, color, x, y, stats, weapon, img, inv) =>
-    mk('player', name, color, x, y, 1, stats, weapon, HUMANS + img, inv);
+    mk('player', name, color, x, y, 1, stats, weapon, HUMAN_TOKENS + img, inv);
   return [
     hero("Leni 'Killmeister' Henari", '#3cc4b1', 700, 300,
       { melee: 11, martialArts: 0, dance: 7, athletic: 11 }, 'laser_rifle', 'killmeister.webp',
@@ -574,19 +585,19 @@ function defaultTokens() {
       { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, 'laser_rifle', 'tinman.webp',
       [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]),
 
-    hostile('Pilot', 1, '#e5604f', 40, 11, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
-    hostile('Pilot', 2, '#e5604f', 37, 14, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
-    hostile('Pilot', 3, '#e5604f', 27, 21, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
-    hostile('Pilot', 4, '#e5604f', 49, 28, { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, 'laser', 'pilot.png', [{ name: 'Laser cell', qty: 2 }]),
+    hostile('Pilot', 1, 40, 11),
+    hostile('Pilot', 2, 37, 14),
+    hostile('Pilot', 3, 27, 21),
+    hostile('Pilot', 4, 49, 28),
 
-    hostile('Grunt', 1, '#c0392b', 37, 25, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
-    hostile('Grunt', 2, '#c0392b', 52, 20, { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, 'rifle', 'grunt.png', [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }]),
+    hostile('Grunt', 1, 37, 25),
+    hostile('Grunt', 2, 52, 20),
 
-    hostile('Navigator', 1, '#ef7d4f', 11, 19, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
-    hostile('Navigator', 2, '#ef7d4f', 14, 20, { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, 'knife', 'navigator.png', [{ name: 'Datapad', qty: 1 }]),
+    hostile('Navigator', 1, 11, 19),
+    hostile('Navigator', 2, 14, 20),
 
-    hostile('Medic', 0, '#d9534f', 21, 21, { melee: 3, martialArts: 4, dance: 0, athletic: 4 }, 'stunrod', 'medic.png', [{ name: 'Medkit', qty: 2 }]),
-    hostile('Engineer', 0, '#a93226', 53, 20, { melee: 6, martialArts: 2, dance: 0, athletic: 5 }, 'club', 'engineer.png', [{ name: 'Tool kit', qty: 1 }, { name: 'Frag grenade', qty: 1 }])
+    hostile('Medic', 0, 21, 21),
+    hostile('Engineer', 0, 53, 20)
   ];
 }
 function snapTok(t) {
@@ -1173,6 +1184,7 @@ $('#mapSelect').onchange = e => selectMap(e.target.value);
 $('#btnEndMission').onclick = endMission;
 $('#placeUnit').onclick = placeSetupUnit;
 $('#placeParty').onclick = movePlayersToDeck;
+$('#spawnEnemies').onclick = () => spawnEnemies($('#spawnRole').value, $('#spawnCount').value);
 $('#beginMission').onclick = beginMission;
 
 /* ---------- panel wiring ---------- */
@@ -1275,6 +1287,71 @@ function renderSetup() {
   if (begin) begin.hidden = !setupPhase;
   const place = $('#placeUnit');
   if (place) place.disabled = !sel.value;
+}
+function nextHostileNumber(role) {
+  let max = 0;
+  const re = new RegExp('^' + role + '(?: (\\d+))?$');
+  for (const t of tokens) {
+    if (t.layer !== 'gm') continue;
+    const m = String(t.name || '').match(re);
+    if (m) max = Math.max(max, +(m[1] || 0));
+  }
+  return max + 1;
+}
+function freeSpawnSlots(count, center) {
+  const g = map.ppg;
+  const maxCol = Math.max(1, Math.floor(map.W / g)), maxRow = Math.max(1, Math.floor(map.H / g));
+  const used = new Set();
+  for (const t of tokens) {
+    if (t.mapKey && t.mapKey !== map.key) continue;
+    used.add(Math.floor(t.x / g) + ',' + Math.floor(t.y / g));
+  }
+  const cc = Math.max(0, Math.min(maxCol - 1, Math.floor(center.x / g)));
+  const cr = Math.max(0, Math.min(maxRow - 1, Math.floor(center.y / g)));
+  const offsets = [[0, 0]];
+  const maxR = Math.max(maxCol, maxRow);
+  for (let r = 1; r <= maxR && offsets.length < count * 4; r++) {
+    for (let x = -r; x <= r; x++) { offsets.push([x, -r], [x, r]); }
+    for (let y = -r + 1; y < r; y++) { offsets.push([-r, y], [r, y]); }
+  }
+  const out = [];
+  for (const [dx, dy] of offsets) {
+    const col = cc + dx, row = cr + dy;
+    if (col < 0 || row < 0 || col >= maxCol || row >= maxRow) continue;
+    const key = col + ',' + row;
+    if (used.has(key)) continue;
+    used.add(key);
+    out.push({ x: (col + 0.5) * g, y: (row + 0.5) * g });
+    if (out.length >= count) break;
+  }
+  while (out.length < count) out.push({ x: center.x, y: center.y });
+  return out;
+}
+function spawnEnemies(role, count) {
+  if (!isHost() || !map) return;
+  const preset = HOSTILE_PRESETS[role];
+  if (!preset) return;
+  count = Math.max(1, Math.min(50, Math.round(+count || 1)));
+  const start = nextHostileNumber(role);
+  const slots = freeSpawnSlots(count, viewCenterWorld());
+  let last = null;
+  for (let i = 0; i < count; i++) {
+    const stats = normalizeStats(preset.stats, 'gm', 1);
+    const maxHp = computeStats(stats).maxHp;
+    const t = {
+      id: nextId++, layer: 'gm', mapKey: map.key, name: role + ' ' + (start + i),
+      color: preset.color, size: 1, x: slots[i].x, y: slots[i].y,
+      status: '', hp: maxHp, maxHp, stats, weapon: preset.weapon,
+      inventory: cloneInventory(preset.inv), img: HUMAN_TOKENS + preset.img
+    };
+    tokens.push(t);
+    loadTokImg(t);
+    last = t;
+  }
+  if (last) selected = last.id;
+  logEvent(`GM spawns ${count} ${role}${count === 1 ? '' : 's'} on ${map.name}.`);
+  changed();
+  showMsg(`${count} ${role}${count === 1 ? '' : 's'} spawned. Drag them into position.`);
 }
 function placeSetupUnit() {
   if (!isHost() || !map) return;
