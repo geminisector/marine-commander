@@ -159,12 +159,22 @@ const WEAPONS = Object.freeze({
 const UNARMED = Object.freeze({ label: 'Unarmed', damage: 1, suckerDamage: 1.5, sucker: 'sucker-punched', verbs: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], type: 'melee' });
 const WEAPON_KEYS = Object.keys(WEAPONS);
 const HUMAN_TOKENS = 'assets/tokens/human/';
+const KILRATHI_TOKENS = 'assets/tokens/kilrathi/';
 const HOSTILE_PRESETS = Object.freeze({
   Pilot:    { color: '#e5604f', stats: { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, weapon: 'laser',   img: 'pilot.png',     inv: [{ name: 'Laser cell', qty: 2 }] },
   Grunt:    { color: '#c0392b', stats: { melee: 8, martialArts: 3, dance: 0, athletic: 6 }, weapon: 'rifle',   img: 'grunt.png',     inv: [{ name: 'Rifle magazine', qty: 2 }, { name: 'Frag grenade', qty: 1 }] },
   Navigator:{ color: '#ef7d4f', stats: { melee: 4, martialArts: 1, dance: 0, athletic: 3 }, weapon: 'knife',   img: 'navigator.png', inv: [{ name: 'Datapad', qty: 1 }] },
   Medic:    { color: '#d9534f', stats: { melee: 3, martialArts: 4, dance: 0, athletic: 4 }, weapon: 'stunrod', img: 'medic.png',     inv: [{ name: 'Medkit', qty: 2 }] },
-  Engineer: { color: '#a93226', stats: { melee: 6, martialArts: 2, dance: 0, athletic: 5 }, weapon: 'club',    img: 'engineer.png',  inv: [{ name: 'Tool kit', qty: 1 }, { name: 'Frag grenade', qty: 1 }] }
+  Engineer: { color: '#a93226', stats: { melee: 6, martialArts: 2, dance: 0, athletic: 5 }, weapon: 'club',    img: 'engineer.png',  inv: [{ name: 'Tool kit', qty: 1 }, { name: 'Frag grenade', qty: 1 }] },
+
+  KCaptain:    { name: 'Kal Shintar Kalra',   label: 'Kilrathi Captain · Kal Shintar Kalra',       color: '#b06be0', stats: { melee: 9,  martialArts: 3, dance: 0, athletic: 9  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kcaptain.png',   inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }] },
+  KOfficer:    { name: 'Dejjar',              label: 'Kilrathi Officer · Dejjar',                  color: '#8e6bd8', stats: { melee: 8,  martialArts: 4, dance: 0, athletic: 8  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kofficer.png',   inv: [{ name: 'Laser cell', qty: 2 }] },
+  KNavigator:  { name: 'First Fang Bhurj',    label: 'Kilrathi Navigator · First Fang Bhurj',      color: '#e67e22', stats: { melee: 7,  martialArts: 3, dance: 0, athletic: 8  }, weapon: 'knife',      dir: KILRATHI_TOKENS, img: 'knavigator.png', inv: [{ name: 'Datapad', qty: 1 }, { name: 'Laser cell', qty: 2 }] },
+  KConscript:  { name: 'Least Claw Bhurj',    label: 'Kilrathi Conscript · Least Claw Bhurj',      color: '#95a5a6', stats: { melee: 7,  martialArts: 2, dance: 0, athletic: 9  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kgrunt.jpg',     inv: [{ name: 'Laser cell', qty: 2 }] },
+  KMedic:      { name: "First Fang Ga'Ree",   label: "Kilrathi Medic · First Fang Ga'Ree",         color: '#d9534f', stats: { melee: 4,  martialArts: 2, dance: 0, athletic: 6  }, weapon: 'stunrod',    dir: KILRATHI_TOKENS, img: 'kofficer.png',   inv: [{ name: 'Medkit', qty: 2 }] },
+  KSoldier:    { name: 'Third Claw Jorn',     label: 'Kilrathi Soldier · Third Claw Jorn',         color: '#e5604f', stats: { melee: 10, martialArts: 4, dance: 0, athletic: 12 }, weapon: 'laser_rifle', dir: KILRATHI_TOKENS, img: 'kgrunt.jpg',    inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }] },
+  KCommOfficer:{ name: 'Second Fang Kalluss', label: 'Kilrathi Comm Officer · Second Fang Kalluss', color: '#16a085', stats: { melee: 3,  martialArts: 2, dance: 0, athletic: 6  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kpilot.png',     inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Datapad', qty: 1 }] },
+  KTerrorist:  { name: "Second Claw L'urr",   label: "Kilrathi Terrorist · Second Claw L'urr",      color: '#d35400', stats: { melee: 7,  martialArts: 3, dance: 0, athletic: 8  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kgrunt.jpg',     inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 3 }] }
 });
 const HOSTILE_ROLES = Object.keys(HOSTILE_PRESETS);
 const cloneInventory = inv => (inv || []).map(x => ({ name: x.name, qty: x.qty }));
@@ -1257,9 +1267,30 @@ function viewCenterWorld() {
     y: Math.max(map.ppg, Math.min(map.H - map.ppg, (r.height / 2 - view.y) / view.k))
   };
 }
+function populateSpawnRoles() {
+  const sel = $('#spawnRole');
+  if (!sel || sel.dataset.ready) return;
+  sel.textContent = '';
+  const groups = new Map();
+  for (const role of HOSTILE_ROLES) {
+    const preset = HOSTILE_PRESETS[role];
+    const key = preset.dir === KILRATHI_TOKENS ? 'Kilrathi characters' : 'Boarding party';
+    let group = groups.get(key);
+    if (!group) {
+      group = document.createElement('optgroup'); group.label = key;
+      groups.set(key, group); sel.append(group);
+    }
+    const o = document.createElement('option');
+    o.value = role;
+    o.textContent = preset.label || role;
+    group.append(o);
+  }
+  sel.dataset.ready = '1';
+}
 function renderSetup() {
   const sel = $('#setupToken');
   if (!sel || !map) return;
+  populateSpawnRoles();
   const previous = sel.value;
   sel.textContent = '';
   const addGroup = (label, list) => {
@@ -1288,9 +1319,10 @@ function renderSetup() {
   const place = $('#placeUnit');
   if (place) place.disabled = !sel.value;
 }
-function nextHostileNumber(role) {
+function nextHostileNumber(base) {
   let max = 0;
-  const re = new RegExp('^' + role + '(?: (\\d+))?$');
+  const safe = String(base).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('^' + safe + '(?: (\\d+))?$');
   for (const t of tokens) {
     if (t.layer !== 'gm') continue;
     const m = String(t.name || '').match(re);
@@ -1332,26 +1364,30 @@ function spawnEnemies(role, count) {
   const preset = HOSTILE_PRESETS[role];
   if (!preset) return;
   count = Math.max(1, Math.min(50, Math.round(+count || 1)));
-  const start = nextHostileNumber(role);
+  const base = preset.name || role;
+  const start = nextHostileNumber(base);
   const slots = freeSpawnSlots(count, viewCenterWorld());
   let last = null;
   for (let i = 0; i < count; i++) {
     const stats = normalizeStats(preset.stats, 'gm', 1);
     const maxHp = computeStats(stats).maxHp;
+    const n = start + i;
+    const name = preset.name ? (n === 1 ? base : base + ' ' + n) : base + ' ' + n;
     const t = {
-      id: nextId++, layer: 'gm', mapKey: map.key, name: role + ' ' + (start + i),
+      id: nextId++, layer: 'gm', mapKey: map.key, name,
       color: preset.color, size: 1, x: slots[i].x, y: slots[i].y,
       status: '', hp: maxHp, maxHp, stats, weapon: preset.weapon,
-      inventory: cloneInventory(preset.inv), img: HUMAN_TOKENS + preset.img
+      inventory: cloneInventory(preset.inv), img: (preset.dir || HUMAN_TOKENS) + preset.img
     };
     tokens.push(t);
     loadTokImg(t);
     last = t;
   }
   if (last) selected = last.id;
-  logEvent(`GM spawns ${count} ${role}${count === 1 ? '' : 's'} on ${map.name}.`);
+  const unitLabel = preset.label || role;
+  logEvent(`GM spawns ${count} × ${unitLabel} on ${map.name}.`);
   changed();
-  showMsg(`${count} ${role}${count === 1 ? '' : 's'} spawned. Drag them into position.`);
+  showMsg(`${count} × ${unitLabel} spawned. Drag them into position.`);
 }
 function placeSetupUnit() {
   if (!isHost() || !map) return;

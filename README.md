@@ -94,7 +94,9 @@ stairs yet. The Map selector chooses the deck being prepared.
   current deck in a loose formation, ready to be dragged into position.
 - **Spawn enemies** creates any number of preset Pilots, Grunts, Navigators,
   Medics or Engineers on the current deck, numbered automatically (for example
-  `Pilot 5`, `Pilot 6`, `Grunt 3`).
+  `Pilot 5`, `Pilot 6`, `Grunt 3`). The Kilrathi group adds the named character
+  presets: Kal Shintar Kalra, Dejjar, First Fang Bhurj, Least Claw Bhurj, First
+  Fang Ga'Ree, Third Claw Jorn, Second Fang Kalluss and Second Claw L'urr.
 - New generic units still come from **Tokens → Add player token / Add hostile**;
   they spawn on the current deck.
 - The updated Cortez placements in `defaultTokens()` remain the default whenever
