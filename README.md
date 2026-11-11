@@ -1,11 +1,11 @@
-# Marine-Commander
+# Marine Commander
 Combat based on the Gemini Sector engine
 
-A host-run battlemap for the Cortez, Kamekh, Dorkir and Dorkathi deck plans. The
-GM picks the map, opens doors, runs the hostiles, assigns turns, edits HP and
-inventory, and keeps the table in sync. Each player joins with a code, controls
-one character, moves and attacks on their turn, and has their own HP bar,
-inventory, combat stats and weapon.
+Marine Commander is a host-run battlemap for the Cortez, Kamekh, Dorkir and
+Dorkathi deck plans. The GM picks the map, opens doors, runs the hostiles,
+assigns turns, edits HP and inventory, and keeps the table in sync. Each player
+joins with a code, controls one character, moves and attacks on their turn, and
+has their own HP bar, inventory, combat stats and weapon.
 
 The app is **static** — no build step, no server, no environment variables — so
 it can be deployed directly to Vercel (or any static host) and still play live.
@@ -167,8 +167,10 @@ portrait. Placement is part of the table state: Solo GM autosaves to
 **Resume**, and live players receive the host's layout. **Reset scene** restores
 the preset above and clears the table, including tokens on other decks; an
 existing solo save is restored when you re-enter, so use **Reset scene** (or
-clear the `cortez-solo-v4` key) to pick up a changed preset. Saves remember the
-selected map and door/light state for every deck in the map list.
+clear the `marine-commander-solo-v4` key) to pick up a changed preset. Saves
+remember the selected map and door/light state for every deck in the map list.
+Saves from before the rename are migrated automatically from the old `cortez-*`
+storage keys.
 
 ### Player
 

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>Marine Commander · Tactical Table</title>
-<meta name="description" content="A live, host-run tactical battlemap for Cortez, Kamekh, Dorkir and Dorkathi deck plans.">
+<meta name="description" content="Marine Commander, a live host-run tactical battlemap for Cortez, Kamekh, Dorkir and Dorkathi deck plans.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
@@ -16,7 +16,7 @@
   <div class="bootcard">
     <div class="kicker">TACTICAL TABLE · LIVESYNC</div>
     <h1>Marine Commander</h1>
-    <p class="lede">A host-run battlemap. One GM picks the deck, opens doors, runs the hostiles, hands out turns and keeps the table in sync. Every player controls one character with hit points, inventory and a combat profile; hostiles react to attacks with the original melee AI.</p>
+    <p class="lede">Marine Commander is a host-run battlemap. One GM picks the deck, opens doors, runs the hostiles, hands out turns and keeps the table in sync. Every player controls one character with hit points, inventory and a combat profile; hostiles react to attacks with the original melee AI.</p>
 
     <label class="bootfield" for="playerName">Display name
       <input id="playerName" type="text" maxlength="24" autocomplete="nickname" placeholder="e.g. Vasquez">
@@ -116,6 +116,14 @@
       <div class="row"><input id="moveLim" type="number" min="0" step="1" value="0" style="width:72px" aria-label="Maximum move per turn in squares"><span class="inl">squares per turn (0 = unlimited)</span></div>
       <div id="turnOrder" class="turnorder"></div>
       <div class="sub">Assign the turn from a token row or here. Players can only move their own token on their turn. Shift-drag still places any token instantly.</div>
+    </section>
+
+    <section class="sec gm-only" id="missionSec">
+      <h2>Mission</h2>
+      <div class="row">
+        <button class="btn primary" id="btnEndMission" type="button">End mission &amp; download log</button>
+      </div>
+      <div class="sub">Ends the mission and downloads a Markdown combat report: every player and hostile, final HP and status, damage dealt and taken, stances, items, movement and the full event log.</div>
     </section>
 
     <section class="sec gm-only">

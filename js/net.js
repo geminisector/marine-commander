@@ -1,4 +1,4 @@
-/* Live transport for Cortez.
+/* Live transport for Marine Commander.
  * Host-authoritative, broker-relayed, end-to-end encrypted with the room code.
  * The only requirement is a websocket MQTT broker; the default is public and
  * needs no account, which keeps the whole app deployable as static files.
@@ -291,5 +291,5 @@ class LiveSession {
 }
 
 window.LiveSession = LiveSession;
-window.CortezNet = { deriveKey, seal, unseal, randomId, CFG };
+window.MarineCommanderNet = { deriveKey, seal, unseal, randomId, CFG };
 })();

@@ -1,4 +1,4 @@
-/* Cortez tactical table — game client.
+/* Marine Commander — game client.
  * Host-authoritative state, rendered from snapshots. Solo mode uses localStorage.
  */
 (() => {
@@ -8,9 +8,16 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const CFG = window.MC_CONFIG || {};
 const MAX_PLAYERS = CFG.maxPlayers || 8;
-const STORE_KEY = 'cortez-solo-v4';
-const HOST_SAVE_KEY = 'cortez-host-save-v4';
-const CLIENT_KEY = 'cortez-client-id';
+const STORE_KEY = 'marine-commander-solo-v4';
+const HOST_SAVE_KEY = 'marine-commander-host-save-v4';
+const CLIENT_KEY = 'marine-commander-client-id';
+const PLAYER_NAME_KEY = 'marine-commander-player-name';
+const LEGACY_KEYS = [
+  ['cortez-solo-v4', STORE_KEY, 'local'],
+  ['cortez-host-save-v4', HOST_SAVE_KEY, 'local'],
+  ['cortez-player-name', PLAYER_NAME_KEY, 'local'],
+  ['cortez-client-id', CLIENT_KEY, 'session']
+];
 const APP_NAME = 'Marine Commander';
 const FALLBACK_MAP = { id: 'cortez', name: 'Cortez', subtitle: 'Deck plan', scene: CFG.mapUrl || 'assets/maps/cortez.scene.json', ppg: 16 };
 const MAPS = (Array.isArray(CFG.maps) && CFG.maps.length ? CFG.maps : [FALLBACK_MAP])
@@ -37,6 +44,8 @@ const DOOR_NAMES = ['Bridge bulkhead','Red blast door (N)','Red blast door (S)',
 const DEFAULT_OPEN = [0, 9, 14];
 const MIN_ROOM = 9;
 
+migrateLegacyKeys();
+
 let map = null, tokens = [], nextId = 1;
 const mapStates = new Map();       // map id -> { doors: bool[], lights: force[] }
 let snapshotLoading = false, pendingSnapshot = null;
@@ -52,6 +61,7 @@ let role = 'gm';                    // gm | player
 let net = null, roomCode = '', hostName = '', hostOnline = true, netState = 'live';
 let me = { clientId: getClientId(), name: '', tokenId: null };
 let roster = [], logRows = [], rev = 0;
+let mission = newMission();
 let turn = { number: 1, activeId: null, moved: {}, attacked: {} };
 let anim = null;                    // unused animation slot kept for scene resets
 let syncTimer = 0, saveTimer = 0, msgTimer = 0;
@@ -67,11 +77,20 @@ const pointers = new Map();
 let drag = null, pinch = null;
 
 /* ---------- small helpers ---------- */
+function migrateLegacyKeys() {
+  try {
+    for (const [from, to, area] of LEGACY_KEYS) {
+      const store = area === 'session' ? sessionStorage : localStorage;
+      const oldValue = store.getItem(from);
+      if (oldValue != null && store.getItem(to) == null) store.setItem(to, oldValue);
+    }
+  } catch (e) { /* storage can be blocked; the new keys still work in memory */ }
+}
 function getClientId() {
   try {
     let id = sessionStorage.getItem(CLIENT_KEY);
     if (!/^[a-f0-9]{16,32}$/.test(id || '')) {
-      id = window.CortezNet ? CortezNet.randomId(12) : Math.random().toString(16).slice(2).padEnd(24, '0');
+      id = window.MarineCommanderNet ? MarineCommanderNet.randomId(12) : Math.random().toString(16).slice(2).padEnd(24, '0');
       sessionStorage.setItem(CLIENT_KEY, id);
     }
     return id;
@@ -308,6 +327,7 @@ function build(d, img, key, meta) {
   const stairs = ((meta && meta.stairs) || []).map(s => Object.assign({}, s, {
     gx: +s.x, gy: +s.y, x: (+s.x) * ppg, y: (+s.y) * ppg
   }));
+  if (MAP_BY_ID.has(key)) mission.maps.add(key);
   map = {
     img, W: img.naturalWidth, H: img.naturalHeight, ppg, walls, doors, lights, stairs, blockers: [],
     key, name: meta ? mapLabel(meta) : (key === 'cortez' ? 'Cortez · Deck plan' : 'Loaded map'),
@@ -329,6 +349,7 @@ function build(d, img, key, meta) {
 }
 
 function resetToDefaults() {
+  resetMission();
   if (!map) return;
   mapStates.clear();
   map.doors.forEach((d, i) => { d.open = map.key === 'cortez' ? DEFAULT_OPEN.includes(i) : false; });
@@ -346,6 +367,7 @@ function resetToDefaults() {
 async function loadCustomMap(d) {
   cacheCurrentMapState();
   await loadMap(d, 'custom', location.href, { name: 'Custom map' });
+  resetMission();
   mapStates.clear();
   tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} };
   roster = []; logRows = []; selected = null; ruler = null;
@@ -706,6 +728,8 @@ async function useStair(t, st) {
   const from = t.mapKey || (map ? map.key : '');
   if (!moveTokenThroughStair(t, st)) { showMsg('Move the token onto the stair marker first.'); return; }
   const dest = MAP_BY_ID.get(st.to);
+  missionToken(t).stairs++;
+  recordMissionAction(t, `Took ${st.name} to ${mapLabel(dest)}.`);
   logEvent(`${t.name} takes ${st.name} to ${mapLabel(dest)}.`);
   fogDirty = true;
   if (map && map.key === from) await selectMap(st.to, { silent: true });
@@ -1072,10 +1096,9 @@ function endPointer(e) {
       if (role === 'player') {
         net && net.sendAction({ type: 'move', tokenId: t.id, x: t.x, y: t.y }).catch(() => showMsg('Could not send the move. Check your connection.'));
       } else {
-        if (settings.turnBased && turn.activeId === t.id) {
-          const d = Math.hypot(t.x - drag.sx, t.y - drag.sy) / map.ppg;
-          turn.moved[t.id] = (turn.moved[t.id] || 0) + d;
-        }
+        const d = Math.hypot(t.x - drag.sx, t.y - drag.sy) / map.ppg;
+        addMissionDistance(t, d);
+        if (settings.turnBased && turn.activeId === t.id) turn.moved[t.id] = (turn.moved[t.id] || 0) + d;
         fogDirty = true; changed();
       }
     }
@@ -1502,7 +1525,24 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false)
     bMove = ai.move; aiRoll = ai.roll;
   }
   if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
+  missionToken(a); missionToken(b);
+  const aHpBefore = a.hp, bHpBefore = b.hp;
   const messages = resolveExchange(a, b, move, bMove, aiRoll);
+  const aDamageTaken = Math.max(0, aHpBefore - a.hp);
+  const bDamageTaken = Math.max(0, bHpBefore - b.hp);
+  const recA = missionToken(a), recB = missionToken(b);
+  recA.damageDealt += bDamageTaken; recA.damageTaken += aDamageTaken; recA.attacksMade++;
+  recB.damageDealt += aDamageTaken; recB.damageTaken += bDamageTaken; recB.attacksReceived++;
+  recB.stances[bMove || 'none'] = (recB.stances[bMove || 'none'] || 0) + 1;
+  const reactionLabel = bMove ? MOVE_LABEL[bMove] : 'caught unaware';
+  recordMissionAction(a, `Attacked ${b.name} with ${MOVE_LABEL[move]}; ${b.name} used ${reactionLabel}; dealt ${bDamageTaken} damage.`);
+  recordMissionAction(b, `Defended against ${a.name} with ${reactionLabel}; took ${bDamageTaken} damage; dealt ${aDamageTaken} damage.`);
+  mission.attacks.push({
+    t: Date.now(), attackerId: a.id, attacker: a.name, targetId: b.id, target: b.name,
+    attack: MOVE_LABEL[move], reaction: reactionLabel, aiRoll,
+    damageToTarget: bDamageTaken, damageToAttacker: aDamageTaken,
+    targetHp: b.hp, targetMax: b.maxHp, attackerHp: a.hp, attackerMax: a.maxHp
+  });
   logEvent(`${a.name} attacks ${b.name}.\n${messages.join('\n')}`, 'combat');
   if (!fromRemote) showMsg(`${a.name} attacks ${b.name} — ${b.hp}/${b.maxHp} HP left.`);
   fogDirty = true;
@@ -1717,6 +1757,8 @@ function useItem(t, idx) {
     net && net.sendAction({ type: 'useItem', tokenId: t.id, name: it.name }).catch(() => {});
   } else {
     it.qty--; if (it.qty <= 0) t.inventory.splice(idx, 1);
+    missionToken(t).items.push(it.name);
+    recordMissionAction(t, `Used ${it.name}.`);
     logEvent(`${t.name} uses ${it.name}.`); changed();
   }
 }
@@ -1952,8 +1994,42 @@ function renderLog() {
   box.scrollTop = box.scrollHeight;
 }
 function logEvent(text, kind = 'sys') {
-  logRows.push({ id: Math.random().toString(36).slice(2), t: Date.now(), text: String(text).slice(0, kind === 'combat' ? 1200 : 300), kind });
+  const entry = { id: Math.random().toString(36).slice(2), t: Date.now(), text: String(text).slice(0, kind === 'combat' ? 1200 : 300), kind };
+  logRows.push(entry);
   if (logRows.length > 90) logRows = logRows.slice(-90);
+  mission.events.push(entry);
+  if (mission.events.length > 5000) mission.events.splice(0, mission.events.length - 5000);
+}
+function newMission() {
+  return { startedAt: Date.now(), endedAt: null, maps: new Set(), events: [], attacks: [], tokens: new Map() };
+}
+function resetMission() { mission = newMission(); }
+function missionToken(t) {
+  if (!t) return null;
+  let rec = mission.tokens.get(t.id);
+  if (!rec) {
+    rec = {
+      id: t.id, name: t.name, layer: t.layer, mapKey: t.mapKey, weapon: t.weapon,
+      maxHp: t.maxHp, hp: t.hp, status: t.status || '', startHp: t.hp || 0,
+      damageDealt: 0, damageTaken: 0, attacksMade: 0, attacksReceived: 0,
+      stances: { strike: 0, grapple: 0, counter: 0, none: 0 },
+      distance: 0, stairs: 0, items: [], actions: [], firstSeen: Date.now()
+    };
+    mission.tokens.set(t.id, rec);
+  }
+  rec.name = t.name; rec.layer = t.layer; rec.mapKey = t.mapKey; rec.weapon = t.weapon;
+  rec.maxHp = t.maxHp; rec.hp = t.hp; rec.status = t.status || '';
+  return rec;
+}
+function recordMissionAction(t, text) {
+  const rec = missionToken(t);
+  if (!rec) return;
+  rec.actions.push({ t: Date.now(), text: String(text).slice(0, 300) });
+  if (rec.actions.length > 250) rec.actions.splice(0, rec.actions.length - 250);
+}
+function addMissionDistance(t, squares) {
+  if (!t || !Number.isFinite(squares) || squares <= 0) return;
+  missionToken(t).distance += squares;
 }
 function updateTurnUI() {
   const active = tokenById(turn.activeId);
@@ -2093,6 +2169,8 @@ async function handleAction(msg) {
       const st = stairsFor(from).find(s => s.id === action.stairId);
       if (!st) { net.notify(clientId, 'That stair is not connected.'); scheduleSync(); return; }
       if (!moveTokenThroughStair(own, st)) { net.notify(clientId, 'Move onto the stair marker first.'); scheduleSync(); return; }
+      missionToken(own).stairs++;
+      recordMissionAction(own, `Took ${st.name} to ${mapLabel(MAP_BY_ID.get(st.to))}.`);
       logEvent(`${own.name} takes ${st.name} to ${mapLabel(MAP_BY_ID.get(st.to))}.`);
       net.notify(clientId, 'You arrive on ' + mapLabel(MAP_BY_ID.get(st.to)) + '.');
       if (map && map.key === from) await selectMap(st.to, { silent: true });
@@ -2119,6 +2197,7 @@ async function handleAction(msg) {
       }
       if (Math.hypot(nx - sx, ny - sy) < 0.5) { net.notify(clientId, 'That move is blocked.'); scheduleSync(); return; }
       own.x = nx; own.y = ny;
+      addMissionDistance(own, dist);
       if (settings.turnBased) turn.moved[own.id] = (turn.moved[own.id] || 0) + dist;
       fogDirty = true; changed(); return;
     }
@@ -2136,6 +2215,8 @@ async function handleAction(msg) {
       const it = own.inventory.find(x => x.name === String(action.name || ''));
       if (!it) return;
       it.qty--; if (it.qty <= 0) own.inventory = own.inventory.filter(x => x !== it);
+      missionToken(own).items.push(it.name);
+      recordMissionAction(own, `Used ${it.name}.`);
       logEvent(`${member.name} uses ${it.name}.`); changed(); return;
     }
     case 'attack': {
@@ -2262,7 +2343,7 @@ function setBusy(v, text) {
 }
 function pickName() {
   const v = sanitizeName($('#playerName').value, '');
-  if (v) { try { localStorage.setItem('cortez-player-name', v); } catch (e) {} }
+  if (v) { try { localStorage.setItem(PLAYER_NAME_KEY, v); } catch (e) {} }
   return v;
 }
 async function ensureMap() {
@@ -2383,7 +2464,7 @@ function roomFromHash() {
 
 /* ---------- boot ---------- */
 $('#darkOut').textContent = '88%'; $('#lscaleOut').textContent = '×2.4'; $('#sightOut').textContent = '40 sq';
-try { $('#playerName').value = localStorage.getItem('cortez-player-name') || ''; } catch (e) {}
+try { $('#playerName').value = localStorage.getItem(PLAYER_NAME_KEY) || ''; } catch (e) {}
 const hashRoom = roomFromHash();
 if (hashRoom && !location.hash.startsWith('#host=')) {
   $('#joinRow').hidden = false;
@@ -2397,7 +2478,7 @@ populateMapSelect();
 const bootMapPromise = loadDefaultMap().catch(err => {
   bootStatus(err.message || 'Could not load the map.', 'err');
 });
-window.__cortez = {
+window.__marineCommander = {
   get map() { return map; }, get tokens() { return tokens; }, get settings() { return settings; },
   get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; },
   get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
