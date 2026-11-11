@@ -71,6 +71,8 @@ let combatCtx = null, combatChosenMove = 'strike';
 const pendingDefense = new Map();    // host: requestId -> { clientId, attackerId, targetId, move, timer }
 let incomingDefense = null;          // player: { requestId, move }
 const DEFENSE_TIMEOUT_MS = 30000;
+const pendingPlayerAttacks = new Map(); // host: requestId -> { id, clientId, attackerId, targetId, move, reaction, queuedAt }
+let pendingAttacks = [];                // player: snapshot copy of the attack queue
 const openStats = new Set();
 let busy = false;
 
@@ -351,6 +353,7 @@ function build(d, img, key, meta) {
 
 function resetToDefaults() {
   resetMission();
+  clearPendingPlayerAttacks();
   if (!map) return;
   mapStates.clear();
   map.doors.forEach((d, i) => { d.open = map.key === 'cortez' ? DEFAULT_OPEN.includes(i) : false; });
@@ -766,6 +769,10 @@ function makeSnapshot() {
     mapStates: allMapStates(),
     settings: sharedSettings(), ftPer, unit,
     roster: roster.map(r => ({ clientId: r.clientId, name: r.name, tokenId: r.tokenId, online: r.online, joinedAt: r.joinedAt })),
+    pendingAttacks: [...pendingPlayerAttacks.values()].map(e => ({
+      id: e.id, clientId: e.clientId, attackerId: e.attackerId, targetId: e.targetId,
+      move: e.move, reaction: e.reaction, queuedAt: e.queuedAt
+    })),
     log: logRows.slice(-70)
   };
 }
@@ -827,6 +834,11 @@ function applySnapshot(s, initial = false) {
   if (s.unit) unit = s.unit;
   turn = s.turn && typeof s.turn.number === 'number' ? { number: s.turn.number, activeId: s.turn.activeId ?? null, moved: s.turn.moved || {}, attacked: s.turn.attacked || {} } : { number: 1, activeId: null, moved: {}, attacked: {} };
   roster = Array.isArray(s.roster) ? s.roster : [];
+  pendingAttacks = Array.isArray(s.pendingAttacks) ? s.pendingAttacks : [];
+  if (initial && sessionRole === 'host') {
+    pendingPlayerAttacks.clear();
+    for (const entry of pendingAttacks) if (entry && entry.id) pendingPlayerAttacks.set(entry.id, Object.assign({}, entry));
+  }
   logRows = Array.isArray(s.log) ? s.log.slice(-70) : [];
   if (!mission.events.length && logRows.length) {
     mission.events = logRows.map(e => Object.assign({}, e));
@@ -1216,7 +1228,7 @@ $('#btnReset').onclick = e => {
 function markSel() { $$('.trow').forEach(r => r.classList.toggle('sel', +r.dataset.id === selected)); }
 function renderAll() {
   if (!map) return;
-  renderTokens(); renderRoster(); renderSheet(); renderTurnOrder(); renderLog(); updateTurnUI(); updateDoorCount(); setHint(null); invalidate();
+  renderTokens(); renderRoster(); renderSheet(); renderTurnOrder(); renderPendingAttacks(); renderLog(); updateTurnUI(); updateDoorCount(); setHint(null); invalidate();
 }
 function renderTokens() {
   for (const [layer, id] of [['player', '#rowsPlayer'], ['gm', '#rowsGm']]) {
@@ -1305,10 +1317,15 @@ function combatTargets(t) {
   return tokens.filter(o => o.id !== t.id && !isDown(o) && onLevel(o) &&
     (role === 'gm' || (o.layer === 'gm' && tokVisible(o))));
 }
+function pendingAttackFor(tokenId) {
+  const list = sessionRole === 'player' ? pendingAttacks : [...pendingPlayerAttacks.values()];
+  return list.find(e => +e.attackerId === +tokenId) || null;
+}
 function attackBlockedReason(t) {
   if (!t || !map) return 'No map loaded';
   if (isDown(t)) return t.name + ' is down';
   if (role === 'player' && t.id !== me.tokenId) return 'Not your character';
+  if (pendingAttackFor(t.id)) return t.name + "'s attack is waiting for the GM";
   if (settings.turnBased) {
     if (turn.activeId !== t.id) return 'Not ' + t.name + "'s turn";
     if (turn.attacked && turn.attacked[t.id]) return t.name + ' has already attacked this turn';
@@ -1321,17 +1338,87 @@ function attackBlockedReason(t) {
 }
 function combatRow(t) {
   const row = document.createElement('div'); row.className = 'l2 combatrow';
-  const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny primary'; b.textContent = settings.turnBased && turn.attacked && turn.attacked[t.id] ? 'Attack used' : 'Attack';
+  const queued = pendingAttackFor(t.id);
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny primary';
+  b.textContent = queued ? 'Attack queued' : settings.turnBased && turn.attacked && turn.attacked[t.id] ? 'Attack used' : 'Attack';
   const reason = attackBlockedReason(t);
   b.disabled = !!reason;
   b.title = reason || 'Choose a target and a move';
   b.onclick = () => openCombat(t.id);
   const w = weaponOf(t);
   const meta = document.createElement('span'); meta.className = 'mono muted combatmeta';
-  meta.textContent = `${w.label} · ${w.type}` + (settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · used' : '');
+  meta.textContent = `${w.label} · ${w.type}` + (queued ? ' · awaiting GM' : settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · used' : '');
   row.append(b, meta);
   return row;
 }
+function resolveQueuedPlayerAttack(id) {
+  const entry = pendingPlayerAttacks.get(id);
+  if (!entry) return;
+  pendingPlayerAttacks.delete(id);
+  const a = tokenById(entry.attackerId), b = tokenById(entry.targetId);
+  if (!a || !b) {
+    net && net.notify(entry.clientId, 'That attack could not be resolved: a combatant is gone.');
+    changed(); return;
+  }
+  const result = performAttack(a.id, b.id, entry.move, entry.reaction, false, { fromQueue: true });
+  if (result.error) {
+    net && net.notify(entry.clientId, 'Attack failed: ' + result.error);
+    showMsg(result.error);
+  } else {
+    net && net.notify(entry.clientId, `${a.name}'s attack was resolved — ${b.name} is at ${b.hp}/${b.maxHp} HP.`);
+  }
+  changed();
+}
+function cancelQueuedPlayerAttack(id) {
+  const entry = pendingPlayerAttacks.get(id);
+  if (!entry) return;
+  pendingPlayerAttacks.delete(id);
+  if (settings.turnBased && turn.attacked && turn.attacked[entry.attackerId] && !pendingAttackFor(entry.attackerId)) {
+    delete turn.attacked[entry.attackerId];
+  }
+  const a = tokenById(entry.attackerId);
+  logEvent(`GM cancels ${a ? a.name : 'the player'}'s attack request.`);
+  net && net.notify(entry.clientId, 'The GM cancelled your attack. You can act again.');
+  changed();
+}
+function clearPendingPlayerAttacks() {
+  pendingPlayerAttacks.clear();
+  pendingAttacks = [];
+}
+function renderPendingAttacks() {
+  const box = $('#pendingAttacks');
+  if (!box) return;
+  box.textContent = '';
+  const list = [...pendingPlayerAttacks.values()].sort((a, b) => (a.queuedAt || 0) - (b.queuedAt || 0));
+  if (!list.length) {
+    const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'No attacks waiting.';
+    box.append(e); return;
+  }
+  for (const entry of list) {
+    const a = tokenById(entry.attackerId), b = tokenById(entry.targetId);
+    const row = document.createElement('div'); row.className = 'pendingattack';
+    const who = document.createElement('div'); who.className = 'who';
+    who.textContent = `${a ? a.name : 'Unknown'} → ${b ? b.name : 'Unknown'} · ${MOVE_LABEL[entry.move] || 'Attack'}` +
+      (b ? ` · ${b.hp}/${b.maxHp} HP` : '');
+    const controls = document.createElement('div'); controls.className = 'controls';
+    const sel = document.createElement('select');
+    sel.setAttribute('aria-label', 'Hostile stance for ' + (b ? b.name : 'target'));
+    for (const [value, label] of [['auto', 'AI random stance'], ['strike', 'Strike'], ['grapple', 'Grapple'], ['counter', 'Counter']]) {
+      const o = document.createElement('option'); o.value = value; o.textContent = label;
+      if ((entry.reaction || 'auto') === value) o.selected = true;
+      sel.append(o);
+    }
+    sel.onchange = () => { entry.reaction = sel.value; };
+    const go = document.createElement('button'); go.type = 'button'; go.className = 'btn tiny primary'; go.textContent = 'Resolve attack';
+    go.onclick = () => resolveQueuedPlayerAttack(entry.id);
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn tiny'; cancel.textContent = 'Cancel';
+    cancel.onclick = () => cancelQueuedPlayerAttack(entry.id);
+    controls.append(sel, go, cancel);
+    row.append(who, controls);
+    box.append(row);
+  }
+}
+
 function statsBlock(t, editable) {
   const d = computeStats(t.stats), w = weaponOf(t);
   const box = document.createElement('details'); box.className = 'statbox';
@@ -1522,14 +1609,14 @@ function resolveExchange(a, b, aMove, bMove, aiRoll) {
   else if (a.hp <= 0 && b.hp <= 0) messages.push('Both combatants are down.');
   return messages;
 }
-function performAttack(attackerId, targetId, move, reaction, fromRemote = false) {
+function performAttack(attackerId, targetId, move, reaction, fromRemote = false, opts = {}) {
   const a = tokenById(attackerId), b = tokenById(targetId);
   if (!a || !b) return { error: 'That combatant is no longer on the table.' };
   if (a.id === b.id) return { error: 'A token cannot attack itself.' };
   if (isDown(a)) return { error: a.name + ' is down.' };
   if (isDown(b)) return { error: b.name + ' is already down.' };
   if (!MOVE_LABEL[move]) return { error: 'Choose Strike, Grapple or Counter.' };
-  if (settings.turnBased) {
+  if (settings.turnBased && !opts.fromQueue) {
     if (turn.activeId !== a.id) return { error: 'It is not ' + a.name + "'s turn." };
     if (turn.attacked && turn.attacked[a.id]) return { error: a.name + ' has already attacked this turn.' };
   }
@@ -1537,7 +1624,7 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false)
   const reach = combatReach(a, b);
   if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
   let aiRoll = null, bMove = reaction;
-  if (b.layer === 'gm' || bMove === 'auto' || !MOVE_LABEL[bMove]) {
+  if (bMove === 'auto' || !MOVE_LABEL[bMove]) {
     const ai = aiReaction(move);
     bMove = ai.move; aiRoll = ai.roll;
   }
@@ -1581,7 +1668,7 @@ function submitCombat() {
     if (!hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
     net.sendAction({ type: 'attack', attackerId: a.id, targetId: b.id, move }).catch(() => showMsg('Could not send the attack.'));
     closeCombat();
-    showMsg('Attack sent to the GM.');
+    showMsg('Attack queued for the GM.');
     return;
   }
   if (b.layer === 'player' && requestPlayerDefense(a, b, move)) { closeCombat(); return; }
@@ -2431,11 +2518,19 @@ async function handleAction(msg) {
       const target = tokenById(+action.targetId);
       if (!target || target.layer !== 'gm') { net.notify(clientId, 'Choose a hostile target.'); return; }
       if (!MOVE_LABEL[action.move]) { net.notify(clientId, 'Choose Strike, Grapple or Counter.'); return; }
-      const result = performAttack(own.id, target.id, action.move, 'auto', true);
-      if (result.error) { net.notify(clientId, result.error); scheduleSync(); return; }
-      const b = tokenById(target.id);
-      net.notify(clientId, `${own.name} attacks ${b ? b.name : 'the target'} — ${b ? b.hp + '/' + b.maxHp : '?'} HP left.`);
-      return;
+      if (pendingAttackFor(own.id)) { net.notify(clientId, 'Your attack is already waiting for the GM.'); scheduleSync(); return; }
+      if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
+      if (settings.turnBased && turn.attacked && turn.attacked[own.id]) { net.notify(clientId, 'You have already attacked this turn.'); scheduleSync(); return; }
+      if (!combatReach(own, target).ok) { net.notify(clientId, own.name + ' is out of reach with a ' + weaponOf(own).label + '.'); scheduleSync(); return; }
+      const id = 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      pendingPlayerAttacks.set(id, {
+        id, clientId, attackerId: own.id, targetId: target.id,
+        move: action.move, reaction: 'auto', queuedAt: Date.now()
+      });
+      if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[own.id] = true; }
+      logEvent(`${own.name} requests an attack on ${target.name} with ${MOVE_LABEL[action.move]}. Waiting for the GM to set the hostile stance.`);
+      net.notify(clientId, 'Attack queued. The GM will set the hostile stance and resolve it.');
+      changed(); return;
     }
     default: return;
   }
@@ -2529,6 +2624,7 @@ function leaveSession() {
   if (sessionRole === 'host' && !confirm('End this live session? Players will be disconnected.')) return;
   busy = true;
   clearDefenseRequests();
+  clearPendingPlayerAttacks();
   incomingDefense = null; closeDefense();
   try { if (net) net.disconnect(); } catch (e) {}
   net = null; sessionRole = 'solo'; role = 'gm'; roomCode = ''; roster = []; hostOnline = true; netState = 'live';

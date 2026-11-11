@@ -219,8 +219,11 @@ Combat is a browser port of the supplied `melee.py` rules.
 - When a hostile defends, its reaction is chosen by the enemy AI using the
   original d20 behaviour: nat 1 = caught unaware (critical sucker-punch),
   2–9 = the losing move, 10–15 = a random move, 16–20 = the winning move.
-  Players never choose a hostile's stance; attacking players always get a random
-  enemy reaction.
+  Players never choose a hostile's stance.
+- Player attacks are **queued** instead of resolving immediately. The GM sees
+  the request under **Attack queue**, picks the hostile's stance (or leaves it
+  on AI random), then presses **Resolve attack**. Cancelling the request lets the
+  player act again.
 - When a hostile attacks a player, the player's **Choose your stance** pop-up
   asks them to pick Strike, Grapple or Counter. The attack resolves on the host
   after their answer. If they do not answer within 30 seconds, a random stance

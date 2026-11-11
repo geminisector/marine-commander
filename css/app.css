@@ -186,6 +186,12 @@ body{min-height:100dvh}
 .turnrow.down{opacity:.5}
 .turnrow .btn{min-height:24px;padding:2px 7px;font-size:11px}
 .turnrow .mono{font-size:10px}
+.pendingattacks{display:flex;flex-direction:column;gap:6px}
+.pendingattack{display:grid;gap:6px;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:rgba(26,36,49,.45)}
+.pendingattack .who{font-size:12.5px}
+.pendingattack .controls{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center}
+.pendingattack select{min-height:28px;font-size:11px;padding:2px 4px;min-width:0}
+.pendingattack .btn{min-height:28px;padding:3px 8px;font-size:11px}
 .tokenadd{display:grid;gap:8px;margin-top:4px}
 .chatrow input{flex:1;min-width:0;min-height:30px;padding:4px 8px}
 .chatrow .btn{min-height:30px}
