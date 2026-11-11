@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Cortez · Tactical Table</title>
+<meta name="description" content="A live, host-run tactical battlemap for the Cortez deck plan.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="boot" id="boot">
+  <div class="bootcard">
+    <div class="kicker">TACTICAL TABLE · LIVESYNC</div>
+    <h1>Cortez</h1>
+    <p class="lede">A host-run battlemap. One GM opens doors, runs the hostiles, hands out turns and keeps the table in sync. Every player controls one character with hit points, inventory and a combat profile; hostiles react to attacks with the original melee AI.</p>
+
+    <label class="bootfield" for="playerName">Display name
+      <input id="playerName" type="text" maxlength="24" autocomplete="nickname" placeholder="e.g. Vasquez">
+    </label>
+
+    <div class="bootactions">
+      <button class="btn primary" id="btnHost" type="button">Host a session</button>
+      <button class="btn" id="btnJoin" type="button">Join with a code</button>
+      <button class="btn ghost" id="btnSolo" type="button">Solo GM</button>
+    </div>
+
+    <div class="joinrow" id="joinRow" hidden>
+      <input id="roomCode" type="text" maxlength="14" autocomplete="off" spellcheck="false" placeholder="ABC-DEF-GHJ" aria-label="Session code">
+      <button class="btn primary" id="btnJoinGo" type="button">Join session</button>
+    </div>
+
+    <button class="btn resume" id="btnResume" type="button" hidden>Resume last hosted session</button>
+
+    <p class="bootstatus" id="bootStatus" role="status"></p>
+
+    <div class="bootnote">
+      <span class="dot"></span>
+      Live sync runs through a public MQTT broker and is encrypted with your session code. It needs no server, so this site can be hosted as static files on Vercel. Share the code (or invite link) only with your table.
+    </div>
+  </div>
+</div>
+
+<div class="app" id="app" data-role="gm" hidden>
+  <header class="bar">
+    <div class="brand">
+      <h1>Cortez</h1>
+      <span id="mapinfo" class="mono muted">loading map…</span>
+    </div>
+    <div class="barctl">
+      <span class="pill" id="turnPill" hidden></span>
+      <span class="mono muted" id="turnInfo"></span>
+      <button class="btn primary" id="endTurn" type="button" hidden>Next turn</button>
+      <span class="conn" id="conn" hidden><span class="dot"></span><span id="connText">offline</span></span>
+      <label class="btn gm-only" for="file" id="fileLabel">Load .dd2vtt</label>
+      <input id="file" type="file" accept=".dd2vtt,.uvtt,.json" hidden>
+      <input id="imgFile" type="file" accept="image/*" hidden>
+      <datalist id="statusList">
+        <option value="Wounded"><option value="Bloodied"><option value="Stunned">
+        <option value="Prone"><option value="Burning"><option value="Fleeing"><option value="Dead">
+      </datalist>
+      <button class="btn" id="btnFit" type="button">Fit</button>
+      <button class="btn gm-only" id="btnReset" type="button">Reset scene</button>
+      <button class="btn" id="btnLeave" type="button" hidden>Leave</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="cv" tabindex="0" aria-label="Battle map. Drag your token, click doors to open or request them."></canvas>
+    <div class="tools">
+      <div class="seg" role="group" aria-label="Tool">
+        <button id="toolMove" type="button" aria-pressed="true">Move</button>
+        <button id="toolRuler" type="button" aria-pressed="false">Ruler</button>
+      </div>
+    </div>
+    <div class="zoom">
+      <button class="btn" id="zOut" type="button" aria-label="Zoom out">−</button>
+      <button class="btn" id="zIn" type="button" aria-label="Zoom in">+</button>
+    </div>
+    <div class="hint mono" id="hint"></div>
+    <div id="phasePill" class="phase" data-phase="player" role="status" hidden></div>
+    <div id="msg" role="status" hidden></div>
+  </main>
+
+  <aside class="panel" aria-label="Controls">
+    <section class="sec" id="sessionSec" hidden>
+      <h2>Live session</h2>
+      <div class="row sessioncode">
+        <span class="mono code" id="roomLabel">—</span>
+        <button class="btn tiny" id="copyInvite" type="button">Copy invite</button>
+      </div>
+      <div class="sub" id="hostLine"></div>
+      <div id="roster" class="roster"></div>
+      <div class="row">
+        <button class="btn tiny" id="btnLeave2" type="button">Leave session</button>
+      </div>
+    </section>
+
+    <section class="sec" id="sheetSec" hidden>
+      <h2>Your character</h2>
+      <div id="sheetBody"></div>
+    </section>
+
+    <section class="sec gm-only" id="turnSec">
+      <h2>Turns</h2>
+      <div class="row">
+        <button class="btn tiny" id="prevTurn" type="button">Previous</button>
+        <button class="btn tiny primary" id="nextTurn2" type="button">Next turn</button>
+        <button class="btn tiny" id="clearTurn" type="button">Unassign</button>
+      </div>
+      <label class="row inl"><input id="turnOn" type="checkbox" checked> Turn-based play</label>
+      <div class="row"><input id="moveLim" type="number" min="0" step="1" value="0" style="width:72px" aria-label="Maximum move per turn in squares"><span class="inl">squares per turn (0 = unlimited)</span></div>
+      <div id="turnOrder" class="turnorder"></div>
+      <div class="sub">Assign the turn from a token row or here. Players can only move their own token on their turn. Shift-drag still places any token instantly.</div>
+    </section>
+
+    <section class="sec gm-only">
+      <h2>Doors</h2>
+      <div class="row"><span id="doorCount" class="mono"></span></div>
+      <div class="row">
+        <button class="btn" id="openAll" type="button">Open all</button>
+        <button class="btn" id="closeAll" type="button">Close all</button>
+      </div>
+      <div class="sub">Click a door on the map to open or close it. Players who click a door ask you to open it; the request appears in the log.</div>
+    </section>
+
+    <section class="sec gm-only">
+      <h2>Lighting</h2>
+      <div class="field"><label for="lmode">Mode</label>
+        <select id="lmode">
+          <option value="auto">Follow doors (open room = light on)</option>
+          <option value="all">All lights on</option>
+          <option value="off">All lights off</option>
+        </select>
+      </div>
+      <div class="field"><div class="top"><label for="dark">Darkness (players)</label><output id="darkOut" class="mono"></output></div><input id="dark" type="range" min="0" max="97" value="88"></div>
+      <div class="field"><div class="top"><label for="lscale">Light radius</label><output id="lscaleOut" class="mono"></output></div><input id="lscale" type="range" min="5" max="50" value="24"></div>
+      <label class="row inl"><input id="peek" type="checkbox" checked> GM view: show unlit rooms dimly</label>
+      <div class="sub">Click a light bulb to cycle it: automatic, forced on, forced off.</div>
+    </section>
+
+    <section class="sec gm-only">
+      <h2>Vision &amp; movement</h2>
+      <label class="row inl"><input id="fogOn" type="checkbox" checked> Players only see what their token sees</label>
+      <label class="row inl"><input id="explOn" type="checkbox" checked> Remember explored areas</label>
+      <div class="field"><div class="top"><label for="sight">Player sight range</label><output id="sightOut" class="mono"></output></div><input id="sight" type="range" min="4" max="64" value="40"></div>
+      <label class="row inl"><input id="preview" type="checkbox"> Preview player vision in GM view</label>
+      <label class="row inl"><input id="gmPass" type="checkbox" checked> GM can move tokens through walls</label>
+      <label class="row inl"><input id="showStatus" type="checkbox"> Players see hostile status</label>
+      <label class="row inl"><input id="showHp" type="checkbox"> Players see hostile health</label>
+      <div class="row"><button class="btn" id="clearExpl" type="button">Clear explored areas</button></div>
+      <div class="sub">Walls and closed doors stop player tokens and block sight. Open a door to let them through.</div>
+    </section>
+
+    <section class="sec">
+      <h2>Ruler</h2>
+      <div class="row">
+        <input id="ftper" type="number" min="0.1" step="0.5" value="5" style="width:80px" aria-label="Distance per square">
+        <span class="inl">per square</span>
+        <select id="unit" aria-label="Unit"><option>ft</option><option>m</option><option>km</option><option>ly</option></select>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>Tokens</h2>
+      <label class="row inl"><input id="snap" type="checkbox" checked> Snap to grid on drop</label>
+      <div class="sub">Players <span id="plCount" class="mono"></span></div>
+      <div id="rowsPlayer"></div>
+      <div class="sub gm-only">Hostiles</div>
+      <div id="rowsGm" class="gm-only"></div>
+      <div class="gm-only tokenadd">
+        <div class="row">
+          <input id="newColor" type="color" value="#e5604f" aria-label="New token colour">
+          <input id="newName" type="text" placeholder="Name" style="flex:1;min-width:90px" aria-label="New token name">
+          <select id="newSize" aria-label="New token size">
+            <option value="1">1×1</option><option value="2">2×2</option>
+            <option value="3">3×3</option><option value="4">4×4</option>
+          </select>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="addPlayer" type="button">Add player token</button>
+          <button class="btn" id="addGm" type="button">Add hostile</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>Table log</h2>
+      <div id="log" class="log"></div>
+      <div class="row chatrow">
+        <input id="chatInput" type="text" maxlength="200" placeholder="Say something…" aria-label="Table chat">
+        <button class="btn tiny" id="chatSend" type="button">Send</button>
+      </div>
+    </section>
+  </aside>
+</div>
+
+
+<dialog id="combatDlg" class="dlg" aria-labelledby="combatTitle">
+  <div class="dlghead">
+    <div><div class="kicker">COMBAT</div><h2 id="combatTitle">Attack</h2></div>
+    <button class="btn tiny" id="combatClose" type="button">Close</button>
+  </div>
+  <div class="combatwho">
+    <div class="combatcard">
+      <span class="mono muted">ATTACKER</span>
+      <strong id="combatAttackerName">—</strong>
+      <span id="combatAttackerStats" class="mono muted"></span>
+    </div>
+    <div class="combatcard">
+      <span class="mono muted">TARGET</span>
+      <select id="combatTarget" aria-label="Combat target"></select>
+      <span id="combatTargetStats" class="mono muted"></span>
+    </div>
+  </div>
+  <div id="combatRange" class="sub"></div>
+  <div class="moveselect" id="combatMoves" role="group" aria-label="Attack move">
+    <button type="button" data-move="strike"><b>Strike</b><span>beats grapple</span></button>
+    <button type="button" data-move="grapple"><b>Grapple</b><span>beats counter</span></button>
+    <button type="button" data-move="counter"><b>Counter</b><span>beats strike</span></button>
+  </div>
+  <label class="field" id="combatReactWrap">Defender reaction
+    <select id="combatReact">
+      <option value="auto">Enemy AI · random reaction</option>
+      <option value="strike">Strike</option>
+      <option value="grapple">Grapple</option>
+      <option value="counter">Counter</option>
+    </select>
+  </label>
+  <div id="combatResult" class="combatresult" hidden></div>
+  <div class="row dlgactions">
+    <button class="btn primary" id="combatGo" type="button">Attack</button>
+    <button class="btn" id="combatCancel" type="button">Cancel</button>
+  </div>
+</dialog>
+
+<script src="vendor/mqtt.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/net.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
