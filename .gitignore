@@ -2,3 +2,6 @@
 .DS_Store
 node_modules/
 .vercel/
+*.kra
+*~
+watermarked_img_*.webp

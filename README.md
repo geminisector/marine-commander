@@ -103,7 +103,8 @@ stairs yet. The Map selector chooses the deck being prepared.
   Medics or Engineers on the current deck, numbered automatically (for example
   `Pilot 5`, `Pilot 6`, `Grunt 3`). The Kilrathi group adds the named character
   presets: Kal Shintar Kalra, Dejjar, First Fang Bhurj, Least Claw Bhurj, First
-  Fang Ga'Ree, Third Claw Jorn, Second Fang Kalluss and Second Claw L'urr.
+  Fang Ga'Ree, Third Claw Jorn, Second Fang Kalluss, Second Claw L'urr and a
+  generic Kilrathi Scientist.
 - New generic units still come from **Tokens → Add player token / Add hostile**;
   they spawn on the current deck.
 - The updated Cortez placements in `defaultTokens()` remain the default whenever
