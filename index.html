@@ -301,6 +301,31 @@
   <div id="defenseResult" class="combatresult" hidden></div>
 </dialog>
 
+<dialog id="requestDlg" class="dlg" aria-labelledby="requestTitle">
+  <div class="dlghead">
+    <div><div class="kicker">PLAYER REQUEST</div><h2 id="requestTitle">Approve request?</h2></div>
+  </div>
+  <div class="combatwho">
+    <div class="combatcard">
+      <span class="mono muted">FROM</span>
+      <strong id="requestFrom">—</strong>
+      <span id="requestDeck" class="mono muted"></span>
+    </div>
+    <div class="combatcard">
+      <span class="mono muted">REQUEST</span>
+      <strong id="requestWhat">—</strong>
+      <span id="requestQueueInfo" class="mono muted"></span>
+    </div>
+  </div>
+  <label class="field" for="requestReason">Reason (sent back to the player)
+    <input id="requestReason" type="text" maxlength="160" placeholder="Optional explanation">
+  </label>
+  <div class="row dlgactions">
+    <button class="btn primary" id="requestApprove" type="button">Yes · allow</button>
+    <button class="btn danger" id="requestDeny" type="button">No · deny</button>
+  </div>
+</dialog>
+
 <dialog id="gmAuthDlg" class="dlg" aria-labelledby="gmAuthTitle">
   <div class="dlghead">
     <div><div class="kicker">HOST ACCESS</div><h2 id="gmAuthTitle">GM password</h2></div>

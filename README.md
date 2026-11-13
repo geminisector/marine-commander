@@ -85,7 +85,9 @@ security, because the password ships in the static client.
 6. Click a door to open/close it, click a bulb to cycle its light, drag tokens
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
    the table log. **Clear all hostiles** in the Tokens section removes every GM
-   token at once. Player door requests appear in the log.
+   token at once. Player door and light requests open a GM pop-up with the
+   target highlighted on the map; approve or deny with a reason that is sent
+   back to the player and recorded in the log.
 7. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
 
@@ -236,9 +238,9 @@ storage keys.
 1. Enter a display name, choose **Join with a code**, and enter the GM's code
    (or open the invite link).
 2. Wait for the GM to assign a character (or ask for one from the sheet).
-3. On your turn, drag your token to move. Click a door to ask the GM to open or
-   close it. Use items or edit your own HP and inventory from **Your
-   character**. The table log has chat.
+3. On your turn, drag your token to move. Click a door or light bulb to ask the
+   GM to open/close the door or switch the light. Use items or edit your own HP
+   and inventory from **Your character**. The table log has chat.
 
 ## Combat
 

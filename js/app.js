@@ -74,6 +74,7 @@ let incomingDefense = null;          // player: { requestId, move }
 const DEFENSE_TIMEOUT_MS = 30000;
 const pendingPlayerAttacks = new Map(); // host: requestId -> { id, clientId, attackerId, targetId, move, reaction, queuedAt }
 let pendingAttacks = [];                // player: snapshot copy of the attack queue
+let hostRequests = [], currentRequest = null; // host: player door/light requests
 const openStats = new Set();
 let busy = false;
 let gmUnlocked = false, pendingHostAction = null;
@@ -358,8 +359,8 @@ function build(d, img, key, meta) {
   const walls = [];
   for (const poly of [...(d.line_of_sight || []), ...(d.objects_line_of_sight || [])])
     for (let i = 0; i < poly.length - 1; i++) { const a = P(poly[i]), b = P(poly[i + 1]); walls.push([a.x, a.y, b.x, b.y]); }
-  const doors = (d.portals || []).map((p, i) => ({ a: P(p.bounds[0]), b: P(p.bounds[1]), open: !p.closed, name: (key === 'cortez' && DOOR_NAMES[i]) || ('Door ' + (i + 1)), regs: [] }));
-  const lights = (d.lights || []).map(l => ({ x: l.position.x * ppg, y: l.position.y * ppg, r: l.range * ppg, rgb: parseColor(l.color), force: null, region: 0, on: false }));
+  const doors = (d.portals || []).map((p, i) => ({ idx: i, a: P(p.bounds[0]), b: P(p.bounds[1]), open: !p.closed, name: (key === 'cortez' && DOOR_NAMES[i]) || ('Door ' + (i + 1)), regs: [] }));
+  const lights = (d.lights || []).map((l, i) => ({ idx: i, x: l.position.x * ppg, y: l.position.y * ppg, r: l.range * ppg, rgb: parseColor(l.color), force: null, region: 0, on: false }));
   const stairs = ((meta && meta.stairs) || []).map(s => Object.assign({}, s, {
     gx: +s.x, gy: +s.y, x: (+s.x) * ppg, y: (+s.y) * ppg
   }));
@@ -955,19 +956,29 @@ function draw() {
     ctx.setLineDash([]);
   }
 
-  if (role === 'gm' && layers.light.vis) {
-    for (const l of map.lights) {
-      const r = 4.5 / k;
-      ctx.beginPath(); ctx.arc(l.x, l.y, r, 0, 6.2832);
-      if (l.on) { ctx.fillStyle = `rgb(${l.rgb})`; ctx.fill(); } else { ctx.fillStyle = 'rgba(7,10,15,.7)'; ctx.fill(); }
-      ctx.lineWidth = 1.5 / k; ctx.strokeStyle = l.force === null ? 'rgba(255,255,255,.75)' : css('--accent');
-      ctx.setLineDash(l.force === null ? [] : [2 / k, 2 / k]); ctx.stroke(); ctx.setLineDash([]);
+  if (layers.light.vis) {
+    if (role === 'gm') {
+      for (const l of map.lights) {
+        const r = 4.5 / k;
+        ctx.beginPath(); ctx.arc(l.x, l.y, r, 0, 6.2832);
+        if (l.on) { ctx.fillStyle = `rgb(${l.rgb})`; ctx.fill(); } else { ctx.fillStyle = 'rgba(7,10,15,.7)'; ctx.fill(); }
+        ctx.lineWidth = 1.5 / k; ctx.strokeStyle = l.force === null ? 'rgba(255,255,255,.75)' : css('--accent');
+        ctx.setLineDash(l.force === null ? [] : [2 / k, 2 / k]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    } else {
+      for (const l of map.lights) {
+        const r = 3.2 / k;
+        ctx.beginPath(); ctx.arc(l.x, l.y, r, 0, 6.2832);
+        ctx.fillStyle = 'rgba(242,169,59,.35)'; ctx.fill();
+        ctx.lineWidth = 1 / k; ctx.strokeStyle = 'rgba(242,169,59,.9)'; ctx.stroke();
+      }
     }
   }
 
   if (settings.fog && fogDirty) fogPass();
   if (fogActive()) { ctx.globalAlpha = role === 'gm' ? 0.72 : 1; ctx.drawImage(fog, 0, 0); ctx.globalAlpha = 1; }
   for (const s of map.stairs || []) drawStair(s);
+  drawRequestHighlight();
   for (const layer of ['gm', 'player']) for (const t of tokens) if (t.layer === layer && onLevel(t) && tokVisible(t)) drawToken(t);
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1058,6 +1069,43 @@ function drawStair(s) {
   ctx.restore();
 }
 
+function drawRequestHighlight() {
+  const req = currentRequest;
+  if (!req || !map || req.mapKey !== map.key) return;
+  const k = view.k;
+  let x, y, label;
+  ctx.save();
+  ctx.strokeStyle = '#ff5bd0';
+  if (req.kind === 'door') {
+    const d = map.doors[req.index];
+    if (!d) { ctx.restore(); return; }
+    x = (d.a.x + d.b.x) / 2; y = (d.a.y + d.b.y) / 2;
+    ctx.lineWidth = Math.max(6, 8 / k);
+    ctx.setLineDash([8 / k, 5 / k]);
+    ctx.beginPath(); ctx.moveTo(d.a.x, d.a.y); ctx.lineTo(d.b.x, d.b.y); ctx.stroke();
+    ctx.setLineDash([]);
+    label = `${req.player} · ${req.value ? 'open' : 'close'}`;
+  } else {
+    const l = map.lights[req.index];
+    if (!l) { ctx.restore(); return; }
+    x = l.x; y = l.y;
+    const r = Math.max(10 / k, map.ppg * 0.45);
+    ctx.lineWidth = Math.max(2, 3 / k);
+    ctx.setLineDash([5 / k, 4 / k]);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+    label = `${req.player} · light ${req.value ? 'on' : 'off'}`;
+  }
+  ctx.restore();
+  const fs = Math.max(10 / k, 4);
+  ctx.font = `600 ${fs}px Inter,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(label).width, pad = fs * 0.55, bh = fs * 1.55;
+  const by = y - Math.max(16 / k, map.ppg * 0.55) - bh;
+  ctx.fillStyle = 'rgba(255,91,208,.94)';
+  ctx.beginPath(); ctx.roundRect(x - tw / 2 - pad, by, tw + pad * 2, bh, bh / 2); ctx.fill();
+  ctx.fillStyle = '#10151c'; ctx.fillText(label, x, by + bh / 2 + fs * 0.04);
+}
+
 function drawRuler() {
   if (!ruler || !map) return;
   const a = toScreen(ruler.a), b = toScreen(ruler.b);
@@ -1123,6 +1171,8 @@ cv.addEventListener('pointerdown', e => {
       if (d) { d.open = !d.open; rebuildBlockers(); lightDirty = true; updateDoorCount(); logEvent(`GM ${d.open ? 'opens' : 'closes'} ${d.name}.`); changed(); return; }
     }
   } else if (role === 'player') {
+    const bl = layers.light.vis ? hitBulb(w) : null;
+    if (bl) { requestLight(bl); return; }
     const d = hitDoor(w);
     if (d) { requestDoor(d); return; }
   }
@@ -1145,13 +1195,13 @@ cv.addEventListener('pointermove', e => {
   }
   const ht = hitToken(w);
   const hd = (layers.rooms.vis && !layers.rooms.lock) ? hitDoor(w) : null;
-  const hb = (role === 'gm' && layers.light.vis) ? hitBulb(w) : null;
+  const hb = layers.light.vis ? hitBulb(w) : null;
   const hs = hitStair(w);
   if (ht !== hoverTok || hd !== hoverDoor || hs !== hoverStair) { hoverTok = ht; hoverDoor = ht ? null : hd; hoverStair = ht ? null : hs; invalidate(); }
   cv.style.cursor = tool === 'ruler' ? 'crosshair' : (ht && canTouch(ht)) ? 'grab' : (hd || hb || hs) ? 'pointer' : 'default';
   const own = ht && (isHost() || ht.id === me.tokenId);
   const turnMsg = ht && role === 'player' && settings.turnBased && turn.activeId !== ht.id ? ' · waiting for their turn' : '';
-  setHint(hs && !ht ? `${hs.name} · click to travel to ${mapLabel(MAP_BY_ID.get(hs.to))}` : hd && !ht ? (role === 'gm' ? `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ${hd.open ? 'close' : 'open'}` : `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ask the GM`) : hb && !ht ? `Light · ${hb.force === null ? 'automatic' : hb.force ? 'forced on' : 'forced off'} · click to cycle` : ht && own ? `${ht.name} · HP ${ht.hp}/${ht.maxHp}${turnMsg}` : null);
+  setHint(hs && !ht ? `${hs.name} · click to travel to ${mapLabel(MAP_BY_ID.get(hs.to))}` : hd && !ht ? (role === 'gm' ? `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ${hd.open ? 'close' : 'open'}` : `${hd.name} · ${hd.open ? 'open' : 'closed'} · click to ask the GM`) : hb && !ht ? (role === 'gm' ? `Light · ${hb.force === null ? 'automatic' : hb.force ? 'forced on' : 'forced off'} · click to cycle` : `Light · click to ask the GM to turn it ${hb.on ? 'off' : 'on'}`) : ht && own ? `${ht.name} · HP ${ht.hp}/${ht.maxHp}${turnMsg}` : null);
 });
 function endPointer(e) {
   pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null;
@@ -2703,9 +2753,90 @@ function setConnState(state, text) {
 
 /* ---------- table actions ---------- */
 function requestDoor(d) {
-  if (!net) return;
-  net.sendAction({ type: 'requestDoor', door: d.name, open: !d.open }).catch(() => {});
-  showMsg(`Asked the GM to ${d.open ? 'close' : 'open'} ${d.name}.`);
+  if (!net || !map) return;
+  const open = !d.open;
+  net.sendAction({ type: 'requestDoor', mapKey: map.key, index: d.idx, value: open, label: d.name }).catch(() => {});
+  showMsg(`Asked the GM to ${open ? 'open' : 'close'} ${d.name}.`);
+}
+function requestLight(l) {
+  if (!net || !map) return;
+  const on = !l.on;
+  net.sendAction({ type: 'requestLight', mapKey: map.key, index: l.idx, value: on }).catch(() => {});
+  showMsg(`Asked the GM to turn ${on ? 'on' : 'off'} light ${l.idx + 1}.`);
+}
+function requestActionLabel(req) {
+  const target = req.kind === 'door' ? (req.label || ('Door ' + (req.index + 1))) : ('light ' + (req.index + 1));
+  return req.kind === 'door' ? `${req.value ? 'open' : 'close'} ${target}` : `turn ${req.value ? 'on' : 'off'} ${target}`;
+}
+async function showNextHostRequest() {
+  if (role !== 'gm' || currentRequest || !hostRequests.length) return;
+  currentRequest = hostRequests.shift();
+  const req = currentRequest;
+  if (map && req.mapKey !== map.key) {
+    try { await selectMap(req.mapKey, { silent: true }); } catch (e) { /* popup can still be reviewed */ }
+  }
+  if (map && map.key === req.mapKey) {
+    if (req.kind === 'door') {
+      const d = map.doors[req.index];
+      if (d) req.label = d.name;
+    } else {
+      const l = map.lights[req.index];
+      if (l) req.label = 'light ' + (req.index + 1);
+    }
+  }
+  $('#requestFrom').textContent = req.player || 'Player';
+  $('#requestDeck').textContent = mapLabel(MAP_BY_ID.get(req.mapKey)) || 'Unknown deck';
+  $('#requestWhat').textContent = requestActionLabel(req);
+  $('#requestQueueInfo').textContent = hostRequests.length ? hostRequests.length + ' more waiting' : '';
+  $('#requestReason').value = '';
+  const dlg = $('#requestDlg');
+  if (!dlg.open) dlg.showModal();
+  setTimeout(() => $('#requestReason').focus(), 40);
+  invalidate();
+}
+function respondToHostRequest(approve) {
+  const req = currentRequest;
+  if (!req) return;
+  const reason = $('#requestReason').value.trim().slice(0, 160);
+  let applied = false;
+  if (approve && map && map.key === req.mapKey) {
+    if (req.kind === 'door') {
+      const d = map.doors[req.index];
+      if (d) {
+        d.open = !!req.value;
+        rebuildBlockers(); lightDirty = true; updateDoorCount(); applied = true;
+      }
+    } else {
+      const l = map.lights[req.index];
+      if (l) {
+        l.force = !!req.value;
+        lightDirty = true; fogDirty = true; applied = true;
+      }
+    }
+    if (applied) cacheCurrentMapState();
+  }
+  const action = requestActionLabel(req);
+  const result = approve ? (applied ? 'approved' : 'approved, but the target was no longer available') : 'denied';
+  const tell = `Your request to ${action} was ${result}.` + (reason ? ' Reason: ' + reason : '');
+  net && net.notify(req.clientId, tell);
+  logEvent(`GM ${approve ? 'approves' : 'denies'} ${req.player}'s request to ${action}${reason ? ': ' + reason : ''}.`);
+  const dlg = $('#requestDlg');
+  if (dlg.open) dlg.close();
+  currentRequest = null;
+  invalidate(); changed();
+  setTimeout(showNextHostRequest, 250);
+}
+$('#requestApprove').onclick = () => respondToHostRequest(true);
+$('#requestDeny').onclick = () => respondToHostRequest(false);
+$('#requestDlg').addEventListener('cancel', e => e.preventDefault());
+$('#requestReason').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); respondToHostRequest(true); }
+});
+function clearHostRequests() {
+  hostRequests = [];
+  currentRequest = null;
+  const dlg = $('#requestDlg');
+  if (dlg.open) dlg.close();
 }
 function sendChat() {
   const inp = $('#chatInput'); const text = inp.value.trim(); if (!text) return;
@@ -2775,13 +2906,25 @@ async function handleAction(msg) {
       showMsg(`${member.name} asks for a character.`);
       changed(); return;
     }
-    case 'requestDoor': {
-      const name = String(action.door || 'a door').slice(0, 40);
-      const verb = action.open === false ? 'close' : 'open';
-      logEvent(`${member.name} asks the GM to ${verb} ${name}.`);
-      net.notify(clientId, 'Your door request was sent to the GM.');
-      showMsg(`${member.name} asks the GM to ${verb} ${name}.`);
-      changed(); return;
+    case 'requestDoor':
+    case 'requestLight': {
+      const kind = action.type === 'requestDoor' ? 'door' : 'light';
+      const mapKey = MAP_BY_ID.has(action.mapKey) ? action.mapKey : map.key;
+      const index = Math.max(0, Math.min(10000, Math.round(+action.index || 0)));
+      const value = !!action.value;
+      const label = kind === 'door' ? String(action.label || ('Door ' + (index + 1))).slice(0, 40) : ('light ' + (index + 1));
+      const req = {
+        id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        clientId, player: member.name, kind, mapKey, index, value, label, queuedAt: Date.now()
+      };
+      hostRequests.push(req);
+      const verb = kind === 'door' ? (value ? 'open' : 'close') : (value ? 'turn on' : 'turn off');
+      logEvent(`${member.name} asks the GM to ${verb} ${label}.`);
+      net.notify(clientId, 'Your request was sent to the GM.');
+      showMsg(`${member.name} asks the GM to ${verb} ${label}.`);
+      changed();
+      showNextHostRequest();
+      return;
     }
     case 'chat': {
       const text = String(action.text || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200);
@@ -2967,6 +3110,7 @@ function leaveSession() {
   busy = true;
   clearDefenseRequests();
   clearPendingPlayerAttacks();
+  clearHostRequests();
   incomingDefense = null; closeDefense();
   try { if (net) net.disconnect(); } catch (e) {}
   net = null; sessionRole = 'solo'; role = 'gm'; roomCode = ''; roster = []; hostOnline = true; netState = 'live';
