@@ -266,10 +266,16 @@ Combat is a browser port of the supplied `melee.py` rules.
   the request under **Attack queue**, picks the hostile's stance (or leaves it
   on AI random), then presses **Resolve attack**. Cancelling the request lets the
   player act again.
-- The GM's attack dialog has two extra override options below the normal moves:
+- The GM's attack dialog has two extra options below the normal moves:
   **Win** makes the attacker win the exchange and damage the defender; **Lose**
   makes the attacker lose and take the defender's damage. These bypass the
-  normal stance matrix and any player stance prompt.
+  normal stance matrix and any player stance prompt. The combat log still reads
+  as a normal exchange, naming one of the Strike/Grapple/Counter pairs rather
+  than announcing a forced result.
+- If a ranged attacker shoots a target armed only for melee and the distance is
+  beyond that target's melee reach, the target automatically loses the exchange.
+  The log explains that they had no ranged reply, and no player stance prompt is
+  shown because the defender cannot answer at that range.
 - When a hostile attacks a player, the player's **Choose your stance** pop-up
   asks them to pick Strike, Grapple or Counter. The attack resolves on the host
   after their answer. If they do not answer within 30 seconds, a random stance

@@ -171,7 +171,7 @@ const HOSTILE_PRESETS = Object.freeze({
   KCaptain:    { name: 'Kal Shintar Kalra',   label: 'Kilrathi Captain · Kal Shintar Kalra',       color: '#b06be0', stats: { melee: 9,  martialArts: 3, dance: 0, athletic: 9  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kcaptain.png',   inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }] },
   KOfficer:    { name: 'Dejjar',              label: 'Kilrathi Officer · Dejjar',                  color: '#8e6bd8', stats: { melee: 8,  martialArts: 4, dance: 0, athletic: 8  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kofficer.png',   inv: [{ name: 'Laser cell', qty: 2 }] },
   KNavigator:  { name: 'First Fang Bhurj',    label: 'Kilrathi Navigator · First Fang Bhurj',      color: '#e67e22', stats: { melee: 7,  martialArts: 3, dance: 0, athletic: 8  }, weapon: 'knife',      dir: KILRATHI_TOKENS, img: 'knavigator.png', inv: [{ name: 'Datapad', qty: 1 }, { name: 'Laser cell', qty: 2 }] },
-  KConscript:  { name: 'Least Claw Bhurj',    label: 'Kilrathi Conscript · Least Claw Bhurj',      color: '#95a5a6', stats: { melee: 7,  martialArts: 2, dance: 0, athletic: 9  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kgrunt.jpg',     inv: [{ name: 'Laser cell', qty: 2 }] },
+  KConscript:  { name: 'Least Claw Bhurj',    label: 'Kilrathi Conscript · Least Claw Bhurj',      color: '#95a5a6', stats: { melee: 7,  martialArts: 2, dance: 0, athletic: 9  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kconscript.png',     inv: [{ name: 'Laser cell', qty: 2 }] },
   KMedic:      { name: "First Fang Ga'Ree",   label: "Kilrathi Medic · First Fang Ga'Ree",         color: '#d9534f', stats: { melee: 4,  martialArts: 2, dance: 0, athletic: 6  }, weapon: 'stunrod',    dir: KILRATHI_TOKENS, img: 'kmedic.png',     inv: [{ name: 'Medkit', qty: 2 }] },
   KSoldier:    { name: 'Third Claw Jorn',     label: 'Kilrathi Soldier · Third Claw Jorn',         color: '#e5604f', stats: { melee: 10, martialArts: 4, dance: 0, athletic: 12 }, weapon: 'laser_rifle', dir: KILRATHI_TOKENS, img: 'kgrunt.jpg',    inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }] },
   KCommOfficer:{ name: 'Second Fang Kalluss', label: 'Kilrathi Comm Officer · Second Fang Kalluss', color: '#16a085', stats: { melee: 3,  martialArts: 2, dance: 0, athletic: 6  }, weapon: 'laser',      dir: KILRATHI_TOKENS, img: 'kpilot.png',     inv: [{ name: 'Laser cell', qty: 2 }, { name: 'Datapad', qty: 1 }] },
@@ -184,6 +184,8 @@ const MOVES = { strike: 'grapple', grapple: 'counter', counter: 'strike' };
 const WIN_MOVES = { strike: 'counter', grapple: 'strike', counter: 'grapple' };
 const MOVE_LABEL = { strike: 'Strike', grapple: 'Grapple', counter: 'Counter' };
 const FORCE_MOVES = { win: 'Win', lose: 'Lose' };
+const WIN_PAIRS = [['strike', 'grapple'], ['grapple', 'counter'], ['counter', 'strike']];
+const LOSE_PAIRS = [['strike', 'counter'], ['grapple', 'strike'], ['counter', 'grapple']];
 const MISS = { strike: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], grapple: ['tripped', 'locked', 'barred', 'extended'] };
 const HIT_ZONE = ['head', 'ribcage', 'arm', 'chest', 'neck', 'gut'];
 const GRAPPLE_ZONE = ['ankle', 'knee', 'elbow', 'shoulder', 'neck'];
@@ -246,6 +248,13 @@ function combatReach(a, b) {
   const d = Math.hypot(a.x - b.x, a.y - b.y) / map.ppg;
   const reach = (a.size + b.size) / 2 + 0.5;
   return { ok: d <= reach + 1e-6, text: `Melee · ${fmt(d)} sq / ${fmt(reach)} sq reach`, dist: d, reach };
+}
+function rangedAutoLoss(a, b) {
+  if (!a || !b || !map) return false;
+  if (weaponOf(a).type !== 'ranged' || weaponOf(b).type === 'ranged') return false;
+  const d = Math.hypot(a.x - b.x, a.y - b.y) / map.ppg;
+  const reach = (a.size + b.size) / 2 + 0.5;
+  return d > reach + 1e-6;
 }
 
 function normalizeInv(inv) {
@@ -1617,19 +1626,25 @@ function renderPendingAttacks() {
   }
   for (const entry of list) {
     const a = tokenById(entry.attackerId), b = tokenById(entry.targetId);
+    const outranged = !!(a && b && rangedAutoLoss(a, b));
     const row = document.createElement('div'); row.className = 'pendingattack';
     const who = document.createElement('div'); who.className = 'who';
     who.textContent = `${a ? a.name : 'Unknown'} → ${b ? b.name : 'Unknown'} · ${MOVE_LABEL[entry.move] || 'Attack'}` +
-      (b ? ` · ${b.hp}/${b.maxHp} HP` : '');
+      (b ? ` · ${b.hp}/${b.maxHp} HP` : '') + (outranged ? ' · defender outranged, automatic win' : '');
     const controls = document.createElement('div'); controls.className = 'controls';
     const sel = document.createElement('select');
     sel.setAttribute('aria-label', 'Hostile stance for ' + (b ? b.name : 'target'));
-    for (const [value, label] of [['auto', 'AI random stance'], ['strike', 'Strike'], ['grapple', 'Grapple'], ['counter', 'Counter']]) {
-      const o = document.createElement('option'); o.value = value; o.textContent = label;
-      if ((entry.reaction || 'auto') === value) o.selected = true;
-      sel.append(o);
+    if (outranged) {
+      const o = document.createElement('option'); o.value = 'auto-win'; o.textContent = 'Automatic win — no ranged reply';
+      sel.append(o); sel.disabled = true;
+    } else {
+      for (const [value, label] of [['auto', 'AI random stance'], ['strike', 'Strike'], ['grapple', 'Grapple'], ['counter', 'Counter']]) {
+        const o = document.createElement('option'); o.value = value; o.textContent = label;
+        if ((entry.reaction || 'auto') === value) o.selected = true;
+        sel.append(o);
+      }
+      sel.onchange = () => { entry.reaction = sel.value; };
     }
-    sel.onchange = () => { entry.reaction = sel.value; };
     const go = document.createElement('button'); go.type = 'button'; go.className = 'btn tiny primary'; go.textContent = 'Resolve attack';
     go.onclick = () => resolveQueuedPlayerAttack(entry.id);
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn tiny'; cancel.textContent = 'Cancel';
@@ -1733,8 +1748,8 @@ function updateCombatDialog() {
   const forced = role === 'gm' && FORCE_MOVES[combatChosenMove];
   if (forced) {
     reactInfo.textContent = combatChosenMove === 'win'
-      ? 'GM override · the attacker wins; the defender takes damage.'
-      : 'GM override · the attacker loses; the attacker takes damage.';
+      ? 'The exchange will be decided in the attacker’s favour.'
+      : 'The exchange will be decided in the defender’s favour.';
   } else if (b.layer === 'gm') reactInfo.textContent = 'Enemy AI · the hostile picks a random stance.';
   else if (role === 'player') reactInfo.textContent = 'The GM controls this defender.';
   else {
@@ -1744,7 +1759,7 @@ function updateCombatDialog() {
       : 'No player is online for this character · random stance.';
   }
   $('#combatGo').disabled = !reach.ok || isDown(b);
-  $('#combatGo').textContent = role === 'player' ? 'Send attack' : forced ? (combatChosenMove === 'win' ? 'Apply win' : 'Apply loss') : 'Attack';
+  $('#combatGo').textContent = role === 'player' ? 'Send attack' : forced ? 'Resolve exchange' : 'Attack';
 }
 function controllerOf(tokenId) {
   return roster.find(r => r.tokenId === tokenId) || null;
@@ -1850,8 +1865,11 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   if (role === 'player' && (a.layer !== 'player' || b.layer !== 'gm')) return { error: 'Players may only attack hostiles.' };
   const reach = combatReach(a, b);
   if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
+  const outranged = rangedAutoLoss(a, b);
   let aiRoll = null, bMove = reaction;
-  if (bMove === 'auto' || !MOVE_LABEL[bMove]) {
+  if (outranged) {
+    bMove = MOVES[move] || 'grapple'; aiRoll = null;
+  } else if (bMove === 'auto' || !MOVE_LABEL[bMove]) {
     const ai = aiReaction(move);
     bMove = ai.move; aiRoll = ai.roll;
   }
@@ -1859,6 +1877,7 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   missionToken(a); missionToken(b);
   missionDamageCtx = [];
   const messages = resolveExchange(a, b, move, bMove, aiRoll);
+  if (outranged) messages.push(`${b.name} has no ranged weapon and cannot answer at this range.`);
   let aDamageTaken = 0, bDamageTaken = 0;
   for (const hit of missionDamageCtx) {
     if (hit.targetId === a.id) aDamageTaken += hit.amount;
@@ -1899,37 +1918,33 @@ function performForcedExchange(attackerId, targetId, outcome) {
   const reach = combatReach(a, b);
   if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
   if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
+
+  // Resolve the requested outcome through an ordinary winning/losing stance pair,
+  // so the log reads as Strike/Grapple/Counter rather than a GM override.
+  const [aMove, bMove] = choice(outcome === 'win' ? WIN_PAIRS : LOSE_PAIRS);
   missionToken(a); missionToken(b);
-  const aPre = healthPct(a), bPre = healthPct(b);
-  const messages = [`GM ruling: ${outcome === 'win' ? a.name : b.name} wins the exchange.`];
   missionDamageCtx = [];
-  if (outcome === 'win') dealCombatDamage(b, damageWithWeapon(a), messages);
-  else dealCombatDamage(a, damageWithWeapon(b), messages);
+  const messages = resolveExchange(a, b, aMove, bMove, null);
   let aDamageTaken = 0, bDamageTaken = 0;
   for (const hit of missionDamageCtx) {
     if (hit.targetId === a.id) aDamageTaken += hit.amount;
     else if (hit.targetId === b.id) bDamageTaken += hit.amount;
   }
   missionDamageCtx = null;
-  healthConditions(a, aPre, healthPct(a), messages);
-  healthConditions(b, bPre, healthPct(b), messages);
-  if (b.hp <= 0 && a.hp > 0) messages.push(`${a.name} is victorious.`);
-  else if (a.hp <= 0 && b.hp > 0) messages.push(`${b.name} is victorious.`);
-  else if (a.hp <= 0 && b.hp <= 0) messages.push('Both combatants are down.');
   const recA = missionToken(a), recB = missionToken(b);
   recA.damageDealt += bDamageTaken; recA.damageTaken += aDamageTaken; recA.attacksMade++;
   recB.damageDealt += aDamageTaken; recB.damageTaken += bDamageTaken; recB.attacksReceived++;
-  const forcedLabel = outcome === 'win' ? 'GM forced win' : 'GM forced loss';
-  recordMissionAction(a, `${forcedLabel} against ${b.name}; dealt ${bDamageTaken} damage.`);
-  recordMissionAction(b, `${forcedLabel} against ${a.name}; took ${bDamageTaken} damage; dealt ${aDamageTaken} damage.`);
+  recB.stances[bMove] = (recB.stances[bMove] || 0) + 1;
+  recordMissionAction(a, `Attacked ${b.name} with ${MOVE_LABEL[aMove]}; ${b.name} used ${MOVE_LABEL[bMove]}; dealt ${bDamageTaken} damage.`);
+  recordMissionAction(b, `Defended against ${a.name} with ${MOVE_LABEL[bMove]}; took ${bDamageTaken} damage; dealt ${aDamageTaken} damage.`);
   mission.attacks.push({
     t: Date.now(), attackerId: a.id, attacker: a.name, targetId: b.id, target: b.name,
-    attack: forcedLabel, reaction: 'GM ruling', aiRoll: null,
+    attack: MOVE_LABEL[aMove], reaction: MOVE_LABEL[bMove], aiRoll: null,
     damageToTarget: bDamageTaken, damageToAttacker: aDamageTaken,
     targetHp: b.hp, targetMax: b.maxHp, attackerHp: a.hp, attackerMax: a.maxHp
   });
-  logEvent(`${a.name} vs ${b.name} — ${forcedLabel}.\n${messages.join('\n')}`, 'combat');
-  showMsg(`${forcedLabel}: ${outcome === 'win' ? b.name : a.name} takes damage.`);
+  logEvent(`${a.name} attacks ${b.name}.\n${messages.join('\n')}`, 'combat');
+  showMsg(`${a.name} attacks ${b.name} — ${b.hp}/${b.maxHp} HP left.`);
   fogDirty = true;
   changed();
   return { ok: true, messages, targetHp: b.hp };
@@ -1956,7 +1971,7 @@ function submitCombat() {
     }
     closeCombat(); return;
   }
-  if (b.layer === 'player' && requestPlayerDefense(a, b, move)) { closeCombat(); return; }
+  if (!rangedAutoLoss(a, b) && b.layer === 'player' && requestPlayerDefense(a, b, move)) { closeCombat(); return; }
   const result = performAttack(a.id, b.id, move, 'auto');
   if (result.error) {
     const box = $('#combatResult'); box.hidden = false; box.textContent = result.error;
