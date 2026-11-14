@@ -273,9 +273,10 @@ Combat is a browser port of the supplied `melee.py` rules.
 - The GM's attack dialog has two extra options below the normal moves:
   **Win** makes the attacker win the exchange and damage the defender; **Lose**
   makes the attacker lose and take the defender's damage. These bypass the
-  normal stance matrix and any player stance prompt. The combat log still reads
-  as a normal exchange, naming one of the Strike/Grapple/Counter pairs rather
-  than announcing a forced result.
+  normal stance matrix and any player stance prompt. Forced results, including
+  the attack queue's **Hostile auto-wins** and **Hostile auto-loses**, are
+  recorded in the log as concrete stances: a win is **Strike/Grapple**, and a
+  loss is **Counter/Grapple**.
 - If a ranged attacker shoots a target armed only for melee and the distance is
   beyond that target's melee reach, the target automatically loses the exchange.
   The log explains that they had no ranged reply, and no player stance prompt is

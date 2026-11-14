@@ -185,8 +185,9 @@ const MOVES = { strike: 'grapple', grapple: 'counter', counter: 'strike' };
 const WIN_MOVES = { strike: 'counter', grapple: 'strike', counter: 'grapple' };
 const MOVE_LABEL = { strike: 'Strike', grapple: 'Grapple', counter: 'Counter' };
 const FORCE_MOVES = { win: 'Win', lose: 'Lose' };
-const WIN_PAIRS = [['strike', 'grapple'], ['grapple', 'counter'], ['counter', 'strike']];
-const LOSE_PAIRS = [['strike', 'counter'], ['grapple', 'strike'], ['counter', 'grapple']];
+// A forced result is recorded as a concrete stance pair instead of override
+// wording. Strike beats Grapple, and Grapple beats Counter.
+const FORCE_RESULT_PAIRS = { win: ['strike', 'grapple'], lose: ['counter', 'grapple'] };
 const MISS = { strike: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], grapple: ['tripped', 'locked', 'barred', 'extended'] };
 const HIT_ZONE = ['head', 'ribcage', 'arm', 'chest', 'neck', 'gut'];
 const GRAPPLE_ZONE = ['ankle', 'knee', 'elbow', 'shoulder', 'neck'];
@@ -1986,9 +1987,10 @@ function performForcedExchange(attackerId, targetId, outcome, opts = {}) {
   if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
   if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
 
-  // Resolve the requested outcome through an ordinary winning/losing stance pair,
-  // so the log reads as Strike/Grapple/Counter rather than a GM override.
-  const [aMove, bMove] = choice(outcome === 'win' ? WIN_PAIRS : LOSE_PAIRS);
+  // Resolve the requested outcome through a concrete winning/losing stance
+  // pair (Strike/Grapple for a win, Counter/Grapple for a loss), so the log
+  // reads as a normal exchange and never announces a forced result.
+  const [aMove, bMove] = FORCE_RESULT_PAIRS[outcome];
   missionToken(a); missionToken(b);
   missionDamageCtx = [];
   const messages = resolveExchange(a, b, aMove, bMove, null);
