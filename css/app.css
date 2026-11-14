@@ -242,6 +242,13 @@ body{min-height:100dvh}
 .dlg{width:min(540px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid var(--line);
   border-radius:12px;background:var(--surface);color:var(--fg);padding:0;box-shadow:0 30px 90px rgba(0,0,0,.6)}
 .dlg::backdrop{background:rgba(3,6,10,.72);backdrop-filter:blur(3px)}
+/* Request cards dock over the control panel so the glowing door on the map stays visible. */
+#requestDlg{position:fixed;top:74px;right:16px;left:auto;bottom:auto;margin:0;width:min(370px,calc(100vw - 24px));max-height:calc(100dvh - 90px)}
+#requestDlg::backdrop{background:rgba(3,6,10,.24);backdrop-filter:none}
+#requestDlg .combatwho{grid-template-columns:1fr}
+@media (max-width:860px){
+  #requestDlg{top:auto;right:12px;bottom:12px;left:12px;width:auto;max-height:calc(100dvh - 24px)}
+}
 .dlghead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:18px 18px 0}
 .dlghead h2{margin:4px 0 0;font:600 26px/1 var(--f-head);letter-spacing:-.01em}
 .combatwho{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 18px 0}

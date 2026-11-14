@@ -75,6 +75,7 @@ const DEFENSE_TIMEOUT_MS = 30000;
 const pendingPlayerAttacks = new Map(); // host: requestId -> { id, clientId, attackerId, targetId, move, reaction, queuedAt }
 let pendingAttacks = [];                // player: snapshot copy of the attack queue
 let hostRequests = [], currentRequest = null; // host: player door/light requests
+let requestGlowStart = 0, requestGlowRaf = 0;    // host: pulsing map highlight for the pending request
 const openStats = new Set();
 let busy = false;
 let gmUnlocked = false, pendingHostAction = null;
@@ -1070,41 +1071,113 @@ function drawStair(s) {
   ctx.restore();
 }
 
+function prefersReducedMotion() {
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+function startRequestGlow() {
+  stopRequestGlow();
+  requestGlowStart = performance.now();
+  if (prefersReducedMotion()) { invalidate(); return; }
+  const tick = () => {
+    requestGlowRaf = 0;
+    if (!currentRequest) return;
+    invalidate();
+    requestGlowRaf = requestAnimationFrame(tick);
+  };
+  requestGlowRaf = requestAnimationFrame(tick);
+}
+function stopRequestGlow() {
+  if (requestGlowRaf) cancelAnimationFrame(requestGlowRaf);
+  requestGlowRaf = 0;
+}
 function drawRequestHighlight() {
   const req = currentRequest;
   if (!req || !map || req.mapKey !== map.key) return;
-  const k = view.k;
+  const k = view.k, TAU = 6.2832;
+  const still = prefersReducedMotion();
+  const elapsed = Math.max(0, performance.now() - requestGlowStart);
+  const pulse = still ? 0.65 : 0.5 + 0.5 * Math.sin(elapsed / 1000 * 5.6);
   let x, y, label;
-  ctx.save();
-  ctx.strokeStyle = '#ff5bd0';
   if (req.kind === 'door') {
     const d = map.doors[req.index];
-    if (!d) { ctx.restore(); return; }
-    x = (d.a.x + d.b.x) / 2; y = (d.a.y + d.b.y) / 2;
-    ctx.lineWidth = Math.max(6, 8 / k);
-    ctx.setLineDash([8 / k, 5 / k]);
-    ctx.beginPath(); ctx.moveTo(d.a.x, d.a.y); ctx.lineTo(d.b.x, d.b.y); ctx.stroke();
+    if (!d) return;
+    const cx = (d.a.x + d.b.x) / 2, cy = (d.a.y + d.b.y) / 2;
+    const dx = d.b.x - d.a.x, dy = d.b.y - d.a.y;
+    const len = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
+    const reach = Math.max(len * 0.9, map.ppg * 1.8);
+    x = cx; y = cy;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const bloom = ctx.createRadialGradient(cx, cy, 0, cx, cy, reach);
+    bloom.addColorStop(0, `rgba(255,150,232,${0.26 + 0.24 * pulse})`);
+    bloom.addColorStop(0.42, `rgba(255,91,208,${0.14 + 0.14 * pulse})`);
+    bloom.addColorStop(1, 'rgba(255,91,208,0)');
+    ctx.fillStyle = bloom;
+    ctx.beginPath(); ctx.ellipse(cx, cy, reach, reach * 0.72, ang, 0, TAU); ctx.fill();
+    ctx.translate(cx, cy); ctx.rotate(ang);
+    ctx.lineCap = 'round';
+    const base = Math.max(7, 9 / k);
+    for (const [mult, alpha] of [[4.4, 0.08], [2.9, 0.13], [1.7, 0.22]]) {
+      ctx.strokeStyle = `rgba(255,91,208,${alpha * (0.7 + 0.3 * pulse)})`;
+      ctx.lineWidth = base * mult;
+      ctx.beginPath(); ctx.moveTo(-len / 2, 0); ctx.lineTo(len / 2, 0); ctx.stroke();
+    }
+    // A highlight travels along the door so it reads as a shine, not just a border.
+    const u = (elapsed / 1200) % 1, span = Math.max(len, map.ppg);
+    const sx = -len / 2 + span * (u * 1.8 - 0.4);
+    const shine = ctx.createLinearGradient(sx - span * 0.28, 0, sx + span * 0.28, 0);
+    shine.addColorStop(0, 'rgba(255,255,255,0)');
+    shine.addColorStop(0.5, `rgba(255,245,255,${still ? 0.5 : 0.85})`);
+    shine.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = shine; ctx.lineWidth = Math.max(2, 3.4 / k);
+    ctx.beginPath(); ctx.moveTo(-len / 2, 0); ctx.lineTo(len / 2, 0); ctx.stroke();
+    ctx.setLineDash([Math.max(5, 8 / k), Math.max(4, 6 / k)]);
+    ctx.lineDashOffset = -(elapsed * 0.035) / k;
+    ctx.strokeStyle = `rgba(255,120,224,${0.55 + 0.35 * pulse})`;
+    ctx.lineWidth = base * 1.15;
+    ctx.beginPath(); ctx.moveTo(-len / 2, 0); ctx.lineTo(len / 2, 0); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.restore();
+    // A slow ping ring makes the requested door easy to spot at any zoom.
+    const ring = still ? 0.45 : (elapsed % 1600) / 1600;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = `rgba(255,170,240,${(1 - ring) * 0.6})`;
+    ctx.lineWidth = Math.max(1.4, 2.4 / k);
+    ctx.beginPath(); ctx.arc(cx, cy, Math.max(map.ppg * 0.3, (8 + ring * 46) / k), 0, TAU); ctx.stroke();
+    ctx.restore();
     label = `${req.player} · ${req.value ? 'open' : 'close'}`;
   } else {
     const l = map.lights[req.index];
-    if (!l) { ctx.restore(); return; }
+    if (!l) return;
     x = l.x; y = l.y;
     const r = Math.max(10 / k, map.ppg * 0.45);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
+    halo.addColorStop(0, `rgba(255,220,150,${0.22 + 0.2 * pulse})`);
+    halo.addColorStop(1, 'rgba(255,190,90,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = `rgba(255,220,150,${0.55 + 0.35 * pulse})`;
     ctx.lineWidth = Math.max(2, 3 / k);
-    ctx.setLineDash([5 / k, 4 / k]);
-    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+    ctx.setLineDash([Math.max(5, 7 / k), Math.max(4, 5 / k)]);
+    ctx.lineDashOffset = -(elapsed * 0.03) / k;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.restore();
     label = `${req.player} · light ${req.value ? 'on' : 'off'}`;
   }
-  ctx.restore();
   const fs = Math.max(10 / k, 4);
   ctx.font = `600 ${fs}px Inter,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const tw = ctx.measureText(label).width, pad = fs * 0.55, bh = fs * 1.55;
   const by = y - Math.max(16 / k, map.ppg * 0.55) - bh;
-  ctx.fillStyle = 'rgba(255,91,208,.94)';
+  ctx.save();
+  ctx.fillStyle = `rgba(255,91,208,${0.94 + 0.06 * pulse})`;
   ctx.beginPath(); ctx.roundRect(x - tw / 2 - pad, by, tw + pad * 2, bh, bh / 2); ctx.fill();
+  ctx.strokeStyle = `rgba(255,220,250,${0.5 + 0.35 * pulse})`;
+  ctx.lineWidth = Math.max(1, 1.4 / k);
+  ctx.stroke();
   ctx.fillStyle = '#10151c'; ctx.fillText(label, x, by + bh / 2 + fs * 0.04);
+  ctx.restore();
 }
 
 function drawRuler() {
@@ -2811,6 +2884,7 @@ async function showNextHostRequest() {
   const dlg = $('#requestDlg');
   if (!dlg.open) dlg.showModal();
   setTimeout(() => $('#requestReason').focus(), 40);
+  startRequestGlow();
   invalidate();
 }
 function respondToHostRequest(approve) {
@@ -2842,6 +2916,7 @@ function respondToHostRequest(approve) {
   const dlg = $('#requestDlg');
   if (dlg.open) dlg.close();
   currentRequest = null;
+  stopRequestGlow();
   invalidate(); changed();
   setTimeout(showNextHostRequest, 250);
 }
@@ -2854,6 +2929,7 @@ $('#requestReason').addEventListener('keydown', e => {
 function clearHostRequests() {
   hostRequests = [];
   currentRequest = null;
+  stopRequestGlow();
   const dlg = $('#requestDlg');
   if (dlg.open) dlg.close();
 }

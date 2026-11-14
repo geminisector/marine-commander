@@ -86,7 +86,7 @@ security, because the password ships in the static client.
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
    the table log. **Clear all hostiles** in the Tokens section removes every GM
    token at once. Player door and light requests open a GM pop-up with the
-   target highlighted on the map; approve or deny with a reason that is sent
+   target glowing on the map; approve or deny with a reason that is sent
    back to the player and recorded in the log.
 7. Keep the tab open — the host is the server. A refresh offers **Resume last
    hosted session** from local storage.
