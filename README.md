@@ -266,8 +266,10 @@ Combat is a browser port of the supplied `melee.py` rules.
   Players never choose a hostile's stance.
 - Player attacks are **queued** instead of resolving immediately. The GM sees
   the request under **Attack queue**, picks the hostile's stance (or leaves it
-  on AI random), then presses **Resolve attack**. Cancelling the request lets the
-  player act again.
+  on AI random), then presses **Resolve attack**. The same picker has **Hostile
+  auto-wins** and **Hostile auto-loses** under **GM override**, so the GM can
+  decide the enemy's fate without rolling the stance matrix. Cancelling the
+  request lets the player act again.
 - The GM's attack dialog has two extra options below the normal moves:
   **Win** makes the attacker win the exchange and damage the defender; **Lose**
   makes the attacker lose and take the defender's damage. These bypass the

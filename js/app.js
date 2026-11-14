@@ -1640,7 +1640,13 @@ function resolveQueuedPlayerAttack(id) {
     net && net.notify(entry.clientId, 'That attack could not be resolved: a combatant is gone.');
     changed(); return;
   }
-  const result = performAttack(a.id, b.id, entry.move, entry.reaction, false, { fromQueue: true });
+  // GM override: "enemy wins/loses" is expressed from the hostile's point of
+  // view, while performForcedExchange takes the attacker's point of view.
+  const forced = entry.reaction === 'enemy-win' ? 'lose'
+    : entry.reaction === 'enemy-lose' ? 'win' : null;
+  const result = forced
+    ? performForcedExchange(a.id, b.id, forced, { fromQueue: true })
+    : performAttack(a.id, b.id, entry.move, entry.reaction, false, { fromQueue: true });
   if (result.error) {
     net && net.notify(entry.clientId, 'Attack failed: ' + result.error);
     showMsg(result.error);
@@ -1684,17 +1690,28 @@ function renderPendingAttacks() {
     const controls = document.createElement('div'); controls.className = 'controls';
     const sel = document.createElement('select');
     sel.setAttribute('aria-label', 'Hostile stance for ' + (b ? b.name : 'target'));
+    const stanceGroup = document.createElement('optgroup'); stanceGroup.label = 'Hostile stance';
+    const overrideGroup = document.createElement('optgroup'); overrideGroup.label = 'GM override';
     if (outranged) {
-      const o = document.createElement('option'); o.value = 'auto-win'; o.textContent = 'Automatic win — no ranged reply';
-      sel.append(o); sel.disabled = true;
+      const o = document.createElement('option'); o.value = 'auto';
+      o.textContent = 'Automatic win — no ranged reply';
+      if ((entry.reaction || 'auto') === 'auto') o.selected = true;
+      stanceGroup.append(o);
     } else {
       for (const [value, label] of [['auto', 'AI random stance'], ['strike', 'Strike'], ['grapple', 'Grapple'], ['counter', 'Counter']]) {
         const o = document.createElement('option'); o.value = value; o.textContent = label;
         if ((entry.reaction || 'auto') === value) o.selected = true;
-        sel.append(o);
+        stanceGroup.append(o);
       }
-      sel.onchange = () => { entry.reaction = sel.value; };
     }
+    for (const [value, label] of [['enemy-win', 'Hostile auto-wins'], ['enemy-lose', 'Hostile auto-loses']]) {
+      const o = document.createElement('option'); o.value = value; o.textContent = label;
+      if (entry.reaction === value) o.selected = true;
+      overrideGroup.append(o);
+    }
+    if (stanceGroup.children.length) sel.append(stanceGroup);
+    sel.append(overrideGroup);
+    sel.onchange = () => { entry.reaction = sel.value; };
     const go = document.createElement('button'); go.type = 'button'; go.className = 'btn tiny primary'; go.textContent = 'Resolve attack';
     go.onclick = () => resolveQueuedPlayerAttack(entry.id);
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn tiny'; cancel.textContent = 'Cancel';
@@ -1953,7 +1970,7 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   changed();
   return { ok: true, messages, targetHp: b.hp };
 }
-function performForcedExchange(attackerId, targetId, outcome) {
+function performForcedExchange(attackerId, targetId, outcome, opts = {}) {
   const a = tokenById(attackerId), b = tokenById(targetId);
   if (!a || !b) return { error: 'That combatant is no longer on the table.' };
   if (a.id === b.id) return { error: 'A token cannot fight itself.' };
@@ -1961,7 +1978,7 @@ function performForcedExchange(attackerId, targetId, outcome) {
   if (setupPhase) return { error: 'Begin the mission before resolving combat.' };
   if (isDown(a)) return { error: a.name + ' is down.' };
   if (isDown(b)) return { error: b.name + ' is already down.' };
-  if (settings.turnBased) {
+  if (settings.turnBased && !opts.fromQueue) {
     if (turn.activeId !== a.id) return { error: 'It is not ' + a.name + "'s turn." };
     if (turn.attacked && turn.attacked[a.id]) return { error: a.name + ' has already attacked this turn.' };
   }
@@ -3014,7 +3031,7 @@ async function handleAction(msg) {
       });
       if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[own.id] = true; }
       logEvent(`${own.name} requests an attack on ${target.name} with ${MOVE_LABEL[action.move]}. Waiting for the GM to set the hostile stance.`);
-      net.notify(clientId, 'Attack queued. The GM will set the hostile stance and resolve it.');
+      net.notify(clientId, 'Attack queued. The GM will set the hostile stance or result and resolve it.');
       changed(); return;
     }
     default: return;
