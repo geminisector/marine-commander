@@ -688,6 +688,10 @@ const canMoveNow = t => {
   if (isHost()) return true;
   return turn.activeId === t.id;
 };
+const canRequestNow = () => {
+  if (role !== 'player' || !settings.turnBased) return true;
+  return me.tokenId != null && turn.activeId === me.tokenId;
+};
 
 function ptSeg(px, py, s) {
   const dx = s[2] - s[0], dy = s[3] - s[1], l2 = dx * dx + dy * dy;
@@ -726,6 +730,13 @@ function snapSafe(t) {
   fogDirty = true;
 }
 function hitToken(w) {
+  // Players only ever control their own character. Check it first so that
+  // another token stacked on top cannot steal the click.
+  if (role === 'player') {
+    const own = tokenById(me.tokenId);
+    if (!own || !onLevel(own) || !tokVisible(own)) return null;
+    return Math.hypot(w.x - own.x, w.y - own.y) <= tokRadius(own) + 2 / view.k ? own : null;
+  }
   const order = [...tokens.filter(t => t.layer === 'player' && onLevel(t)), ...tokens.filter(t => t.layer === 'gm' && onLevel(t))].reverse();
   for (const t of order) if (tokVisible(t) && Math.hypot(w.x - t.x, w.y - t.y) <= tokRadius(t) + 2 / view.k) return t;
   return null;
@@ -2875,14 +2886,19 @@ function setConnState(state, text) {
 }
 
 /* ---------- table actions ---------- */
+function blockedRequestMessage() {
+  showMsg(turn.activeId ? 'You can only ask the GM for doors and lights on your turn.' : 'The GM has not assigned a turn yet.');
+}
 function requestDoor(d) {
   if (!net || !map) return;
+  if (!canRequestNow()) { blockedRequestMessage(); return; }
   const open = !d.open;
   net.sendAction({ type: 'requestDoor', mapKey: map.key, index: d.idx, value: open, label: d.name }).catch(() => {});
   showMsg(`Asked the GM to ${open ? 'open' : 'close'} ${d.name}.`);
 }
 function requestLight(l) {
   if (!net || !map) return;
+  if (!canRequestNow()) { blockedRequestMessage(); return; }
   const on = !l.on;
   net.sendAction({ type: 'requestLight', mapKey: map.key, index: l.idx, value: on }).catch(() => {});
   showMsg(`Asked the GM to turn ${on ? 'on' : 'off'} light ${l.idx + 1}.`);
@@ -3034,6 +3050,11 @@ async function handleAction(msg) {
     }
     case 'requestDoor':
     case 'requestLight': {
+      if (!own) { net.notify(clientId, 'You need an assigned character to ask for doors or lights.'); scheduleSync(); return; }
+      if (settings.turnBased && turn.activeId !== own.id) {
+        net.notify(clientId, 'You can only ask the GM for doors and lights on your turn.');
+        scheduleSync(); return;
+      }
       const kind = action.type === 'requestDoor' ? 'door' : 'light';
       const mapKey = MAP_BY_ID.has(action.mapKey) ? action.mapKey : map.key;
       const index = Math.max(0, Math.min(10000, Math.round(+action.index || 0)));
