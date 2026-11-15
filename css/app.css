@@ -167,6 +167,13 @@ body{min-height:100dvh}
 .trow.mine{outline:1px solid rgba(60,196,177,.35)}
 .hprow{gap:4px;padding-left:4px}
 .hprow .hpin{width:48px;min-height:26px;padding:2px 4px;font-size:12px}
+.playerhud{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:1px 0 2px}
+.playerhud .btn{min-height:30px;padding:4px 12px}
+.apmeter{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;
+  background:rgba(26,36,49,.72);padding:4px 10px;min-height:30px}
+.apmeter b{font:600 10px/1 var(--f-mono);letter-spacing:.14em;color:var(--accent)}
+.apmeter span{font:600 16px/1 var(--f-head)}
+.apmeter.empty span{color:var(--gm)}
 .invbox{display:grid;gap:5px;padding:5px 4px 3px 34px}
 .invbox .invhead{display:flex;align-items:center;justify-content:space-between;gap:6px;
   font:600 9px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}

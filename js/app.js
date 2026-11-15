@@ -2402,6 +2402,23 @@ function addToken(layer) {
 $('#addPlayer').onclick = () => addToken('player'); $('#addGm').onclick = () => addToken('gm');
 $('#clearHostiles').onclick = clearAllHostiles;
 
+function actionPoints(t) {
+  if (!t || !settings.turnBased || settings.moveLimit <= 0) return Infinity;
+  return Math.max(0, settings.moveLimit - (turn.moved[t.id] || 0));
+}
+function actionPointLabel(t) {
+  const ap = actionPoints(t);
+  return ap === Infinity ? '∞' : fmt(ap);
+}
+function endPlayerTurn(t) {
+  if (!t || !settings.turnBased) return;
+  if (setupPhase) { showMsg('Begin the mission before ending a turn.'); return; }
+  if (turn.activeId !== t.id) { showMsg('You can only end your own turn.'); return; }
+  if (isDown(t)) { showMsg('Your character is down.'); return; }
+  if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+  net.sendAction({ type: 'endTurn', tokenId: t.id }).catch(() => showMsg('Could not end your turn. Check your connection.'));
+  showMsg('Ending your turn…');
+}
 function renderSheet() {
   const sec = $('#sheetSec');
   if (sessionRole !== 'player') { sec.hidden = true; return; }
@@ -2415,11 +2432,12 @@ function renderSheet() {
     b.onclick = () => { net && net.sendAction({ type: 'requestSeat' }).catch(() => {}); showMsg('Asked the GM for a character.'); };
     body.append(p, b); return;
   }
+  const myTurn = settings.turnBased && !setupPhase && turn.activeId === t.id;
   const head = document.createElement('div'); head.className = 'sheethead';
   const sw = document.createElement('span'); sw.className = 'swatch big'; sw.style.background = t.color;
   const nm = document.createElement('strong'); nm.textContent = t.name;
   head.append(sw, nm);
-  if (settings.turnBased && turn.activeId === t.id) head.append(badge('YOUR TURN', 'turn'));
+  if (myTurn) head.append(badge('YOUR TURN', 'turn'));
   body.append(head);
   const offLevel = t.mapKey && map && t.mapKey !== map.key;
   const status = document.createElement('div'); status.className = 'sub';
@@ -2430,6 +2448,19 @@ function renderSheet() {
     note.textContent = 'The GM is viewing ' + map.name + '. Your character is on another deck.';
     body.append(note);
   }
+  const hud = document.createElement('div'); hud.className = 'playerhud';
+  const ap = document.createElement('span'); ap.className = 'apmeter';
+  ap.title = settings.turnBased ? (settings.moveLimit > 0 ? 'Action points left this turn (movement squares).' : 'Movement is unlimited this turn.') : 'Free movement is on.';
+  ap.setAttribute('aria-label', 'Action points: ' + actionPointLabel(t) + ' moves left');
+  const apKey = document.createElement('b'); apKey.textContent = 'AP';
+  const apVal = document.createElement('span'); apVal.textContent = actionPointLabel(t);
+  if (settings.turnBased && settings.moveLimit > 0 && actionPoints(t) <= 0) ap.classList.add('empty');
+  ap.append(apKey, apVal);
+  const turnBtn = document.createElement('button'); turnBtn.type = 'button'; turnBtn.className = 'btn primary tiny'; turnBtn.textContent = 'End turn';
+  turnBtn.disabled = !myTurn || isDown(t) || !hostOnline || netState !== 'live';
+  turnBtn.title = myTurn ? 'End your turn and advance the table to the next character.' : 'You can only end your own turn.';
+  turnBtn.onclick = () => endPlayerTurn(t);
+  hud.append(ap, turnBtn); body.append(hud);
   body.append(hpBlock(t, true, false));
   body.append(combatRow(t));
   body.append(statsBlock(t, false));
@@ -2437,7 +2468,7 @@ function renderSheet() {
   const lab = document.createElement('div'); lab.className = 'invhead'; lab.append(Object.assign(document.createElement('span'), { textContent: 'Inventory' }));
   inv.append(lab, inventoryEditor(t, true)); body.append(inv);
   const hint = document.createElement('div'); hint.className = 'sub';
-  hint.textContent = settings.turnBased ? (turn.activeId === t.id ? 'Your turn: drag, attack a hostile, click doors to ask for them, or use items.' : 'Wait for the GM to assign your turn.') : 'Free movement is on. Drag, attack, or use items when ready.';
+  hint.textContent = settings.turnBased ? (myTurn ? 'Your turn: drag, attack a hostile, click doors to ask for them, use items, or press End turn.' : 'Wait for the GM to assign your turn.') : 'Free movement is on. Drag, attack, or use items when ready.';
   body.append(hint);
 }
 
@@ -3111,6 +3142,17 @@ async function handleAction(msg) {
       logEvent(`${own.name} requests an attack on ${target.name} with ${MOVE_LABEL[action.move]}. Waiting for the GM to set the hostile stance.`);
       net.notify(clientId, 'Attack queued. The GM will set the hostile stance or result and resolve it.');
       changed(); return;
+    }
+    case 'endTurn': {
+      if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only end your own turn.'); return; }
+      if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
+      if (!settings.turnBased) { net.notify(clientId, 'Free movement is on; there is no turn to end.'); return; }
+      if (turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
+      if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
+      logEvent(`${own.name} ends their turn.`);
+      net.notify(clientId, 'Your turn has ended.');
+      nextTurn(1);
+      return;
     }
     default: return;
   }

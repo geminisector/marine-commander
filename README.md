@@ -81,7 +81,10 @@ security, because the password ships in the static client.
 4. Assign characters from the **Live session** roster (players are auto-seated
    into a free player token when they join).
 5. Use **Turns** to give a token the turn, or **Next turn** to cycle through
-   everyone alive. Set a per-turn movement limit if you want one.
+   everyone alive. Set a per-turn movement limit if you want one. Players see
+   their remaining **AP** (movement squares left) on their character sheet and
+   can press **End turn** there; the host only accepts that for the player whose
+   turn is actually active.
 6. Click a door to open/close it, click a bulb to cycle its light, drag tokens
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
    the table log. **Clear all hostiles** in the Tokens section removes every GM
@@ -238,9 +241,12 @@ storage keys.
 1. Enter a display name, choose **Join with a code**, and enter the GM's code
    (or open the invite link).
 2. Wait for the GM to assign a character (or ask for one from the sheet).
-3. On your turn, drag your token to move. Click a door or light bulb to ask the
-   GM to open/close the door or switch the light. Use items or edit your own HP
-   and inventory from **Your character**. The table log has chat.
+3. On your turn, drag your token to move. The **AP** meter on **Your character**
+   shows how many movement squares are left this turn (∞ when the GM has set no
+   limit). Press **End turn** to advance the table to the next character. Click a
+   door or light bulb to ask the GM to open/close the door or switch the light.
+   Use items or edit your own HP and inventory from **Your character**. The table
+   log has chat.
 
 ## Combat
 
