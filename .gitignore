@@ -5,3 +5,5 @@ node_modules/
 *.kra
 *~
 watermarked_img_*.webp
+__pycache__/
+*.pyc

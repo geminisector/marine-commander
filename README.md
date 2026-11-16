@@ -197,8 +197,9 @@ json.dump(d, open('assets/maps/newmap.scene.json', 'w'), separators=(',', ':'))
 
 ### The Cortez boarding party
 
-The built-in scene starts with the four heroes and a ten-strong hostile
-boarding party drawn from `assets/tokens/human/`:
+The built-in scene starts with the four heroes below, any imported CombatBot
+characters, and a ten-strong hostile boarding party drawn from
+`assets/tokens/human/`:
 
 | Hero | Callsign | Portrait | Weapon |
 | --- | --- | --- | --- |
@@ -247,6 +248,28 @@ storage keys.
    door or light bulb to ask the GM to open/close the door or switch the light.
    Use items or edit your own HP and inventory from **Your character**. The table
    log has chat.
+
+### Importing CombatBot characters
+
+`tools/import_character.py` reads the newest saved snapshot for a character from
+CombatBot's `resources/characters.db`, converts the melee-relevant stats, and
+writes them into the browser roster at [`js/characters.js`](js/characters.js).
+
+```bash
+python3 tools/import_character.py Karen Salmon Ella Amber
+# or point at a database elsewhere:
+python3 tools/import_character.py --db ~/git/CombatBot/resources/characters.db Karen
+```
+
+The importer uses CombatBot's existing melee mapping: **Athletic** becomes the
+Athletic stat, while **Melee**, **Martial Arts** and **Dance** (or **Dancing**)
+come from the character's skill list. It also carries over non-credit inventory
+items, adds a laser cell/medkit kit, and merges new characters into the existing
+generated file instead of replacing them. Re-running a name updates that
+character from its latest snapshot. Imported characters are seated before the
+four built-in heroes; older heroes fill any remaining player slots. The database
+does not carry portraits, so imported tokens start with their colour and first
+initial; use **Img** in the token row to upload a portrait.
 
 ## Combat
 
@@ -308,8 +331,10 @@ Combat is a browser port of the supplied `melee.py` rules.
 index.html                 app shell and controls
 css/app.css                all presentation
 js/config.js               broker URLs, heartbeat/timeout, map catalog and stairs
+js/characters.js           generated roster imported from CombatBot
 js/net.js                  MQTT transport, room crypto, presence
 js/app.js                  map renderer, rules, turn/roster/state UI
+tools/import_character.py  CombatBot characters.db -> Marine Commander importer
 assets/maps/*.scene.json        extracted UVTT geometry for each deck (image path, no base64)
 assets/maps/*.png               extracted map images
 assets/maps/*.dd2vtt            original source maps

@@ -26,11 +26,18 @@ const MAPS = (Array.isArray(CFG.maps) && CFG.maps.length ? CFG.maps : [FALLBACK_
 const MAP_BY_ID = new Map(MAPS.map(m => [m.id, m]));
 const DEFAULT_MAP_ID = MAP_BY_ID.has(CFG.defaultMapId) ? CFG.defaultMapId : MAPS[0].id;
 const mapLabel = m => m ? (m.name + (m.subtitle ? ' · ' + m.subtitle : '')) : 'Map';
-// Built-in characters keep their names when a seat changes hands or is kicked.
+// Imported and built-in characters keep their names when a seat changes hands or is kicked.
 const FIXED_PLAYER_NAMES = new Set([
   "Leni 'Killmeister' Henari", "Keyan 'Enforcer' Steele",
   "Cyric 'Talon' Karde", "Derek 'Tinman' Miles"
 ]);
+// Optional roster generated from CombatBot by tools/import_character.py.
+const IMPORTED_CHARACTERS = (Array.isArray(window.MC_CHARACTERS) ? window.MC_CHARACTERS : [])
+  .filter(c => c && typeof c === 'object' && (c.name || c.callsign));
+for (const c of IMPORTED_CHARACTERS) {
+  const name = String(c.name || c.callsign || '').trim().slice(0, 40);
+  if (name) FIXED_PLAYER_NAMES.add(name);
+}
 
 const cv = $('#cv'), ctx = cv.getContext('2d');
 const imgs = new Map();
@@ -603,10 +610,21 @@ function defaultTokens() {
     return mk('gm', role + (n ? ' ' + n : ''), preset.color, x, y, 1, preset.stats,
       preset.weapon, HUMAN_TOKENS + preset.img, cloneInventory(preset.inv));
   };
-  // The four heroes are fixed characters: their names survive a player taking the seat.
+  // The four built-in heroes are fixed characters: their names survive a player
+  // taking the seat. Imported CombatBot characters are seated first.
   const hero = (name, color, x, y, stats, weapon, img, inv) =>
     mk('player', name, color, x, y, 1, stats, weapon, HUMAN_TOKENS + img, inv);
-  return [
+  const importedSpots = [[740, 300], [720, 311], [760, 320], [740, 280], [760, 280], [720, 340], [780, 300], [780, 340]];
+  const importedHero = (c, i) => {
+    const [x, y] = importedSpots[i % importedSpots.length];
+    const name = String(c.name || c.callsign || 'Imported character').trim().slice(0, 40);
+    const color = /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#5ec8e5';
+    const weapon = WEAPONS[c.weapon] ? c.weapon : 'laser_rifle';
+    const img = typeof c.img === 'string' ? c.img : '';
+    return mk('player', name, color, x, y, 1, c.stats, weapon, img, normalizeInv(c.inventory));
+  };
+  const imported = IMPORTED_CHARACTERS.slice(0, MAX_PLAYERS).map(importedHero);
+  const classic = [
     hero("Leni 'Killmeister' Henari", '#3cc4b1', 700, 300,
       { melee: 11, martialArts: 0, dance: 7, athletic: 11 }, 'laser_rifle', 'killmeister.webp',
       [{ name: 'Combat knife', qty: 1 }, { name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Frag grenade', qty: 1 }]),
@@ -618,7 +636,11 @@ function defaultTokens() {
       [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
     hero("Derek 'Tinman' Miles", '#c58bff', 680, 280,
       { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, 'laser_rifle', 'tinman.webp',
-      [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]),
+      [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }])
+  ];
+  return [
+    ...imported,
+    ...classic.slice(0, Math.max(0, MAX_PLAYERS - imported.length)),
 
     hostile('Pilot', 1, 40, 11),
     hostile('Pilot', 2, 37, 14),
