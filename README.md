@@ -256,7 +256,8 @@ CombatBot's `resources/characters.db`, converts the melee-relevant stats, and
 writes them into the browser roster at [`js/characters.js`](js/characters.js).
 
 ```bash
-python3 tools/import_character.py Karen Salmon Ella Amber
+python3 tools/import_character.py --img-dir assets/tokens/player \
+  Beagle Brightshield Deck Ella Gauge Jukebox Karen Salmon Shark Shredder Tinker
 # or point at a database elsewhere:
 python3 tools/import_character.py --db ~/git/CombatBot/resources/characters.db Karen
 ```
@@ -266,10 +267,13 @@ Athletic stat, while **Melee**, **Martial Arts** and **Dance** (or **Dancing**)
 come from the character's skill list. It also carries over non-credit inventory
 items, adds a laser cell/medkit kit, and merges new characters into the existing
 generated file instead of replacing them. Re-running a name updates that
-character from its latest snapshot. Imported characters are seated before the
-four built-in heroes; older heroes fill any remaining player slots. The database
-does not carry portraits, so imported tokens start with their colour and first
-initial; use **Img** in the token row to upload a portrait.
+character from its latest snapshot.
+
+`--img-dir` matches each character's callsign to a portrait with the same file
+name, ignoring extension, so run it against `assets/tokens/player/` whenever
+portraits change. Imported characters are seated before the four built-in
+heroes; older heroes fill any remaining player slots. The table supports 16
+player tokens. Use **Img** in a token row to replace a portrait manually.
 
 ## Combat
 
@@ -338,6 +342,9 @@ tools/import_character.py  CombatBot characters.db -> Marine Commander importer
 assets/maps/*.scene.json        extracted UVTT geometry for each deck (image path, no base64)
 assets/maps/*.png               extracted map images
 assets/maps/*.dd2vtt            original source maps
+assets/tokens/player/*          player character portraits
+assets/tokens/human/*           hostile boarding-party portraits
+assets/tokens/kilrathi/*        Kilrathi portraits
 vendor/mqtt.min.js              MQTT.js 5.10.1 browser bundle (MIT)
 marine_commander.html           original single-file version, kept for reference
 vtt/cortez.dd2vtt               original map file supplied with the project

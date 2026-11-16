@@ -33,7 +33,7 @@ window.MC_CHARACTERS = [
         "qty": 1
       }
     ],
-    "img": "",
+    "img": "assets/tokens/player/karen.png",
     "quirks": [
       "Socially Oblivious",
       "Paranoid",
@@ -43,7 +43,7 @@ window.MC_CHARACTERS = [
     "description": "She could be described as minuet or mousy. She has a distinct way of moving, she is mindful of how she steps since she grew up on a space station where gravity wasn't always well calibrated. She often wears the 'Majestic' sweats, when off duty, and on duty, she is in a flight suit. Her hair is often a mess, and bound in a loose ponytail. She also never wears makeup, considering nailpolish risque.",
     "source": {
       "characterId": 14,
-      "snapshotAt": "2026-11-15T06:21:54+00:00"
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
     }
   },
   {
@@ -72,7 +72,7 @@ window.MC_CHARACTERS = [
         "qty": 1
       }
     ],
-    "img": "",
+    "img": "assets/tokens/player/salmon.webp",
     "quirks": [
       "Eloquent",
       "Sardonic",
@@ -81,7 +81,7 @@ window.MC_CHARACTERS = [
     "description": "",
     "source": {
       "characterId": 31,
-      "snapshotAt": "2026-11-15T06:21:55+00:00"
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
     }
   },
   {
@@ -110,7 +110,7 @@ window.MC_CHARACTERS = [
         "qty": 1
       }
     ],
-    "img": "",
+    "img": "assets/tokens/player/ella.png",
     "quirks": [
       "Dry Humour",
       "Impatient"
@@ -118,7 +118,7 @@ window.MC_CHARACTERS = [
     "description": "",
     "source": {
       "characterId": 41,
-      "snapshotAt": "2026-11-15T06:21:54+00:00"
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
     }
   },
   {
@@ -153,6 +153,323 @@ window.MC_CHARACTERS = [
     "source": {
       "characterId": 18,
       "snapshotAt": "2026-11-15T06:21:54+00:00"
+    }
+  },
+  {
+    "callsign": "Beagle",
+    "name": "Seamus 'Beagle' McGrath",
+    "firstName": "Seamus",
+    "lastName": "McGrath",
+    "rank": "1st Lieutenant",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#58d68a",
+    "stats": {
+      "melee": 0,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 5
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/beagle.png",
+    "quirks": [
+      "Gallows Humour",
+      "Catholic",
+      "A Charmed Life"
+    ],
+    "description": "Standard Confed Pilot's uniform with a 'BEAGLE' flash.",
+    "source": {
+      "characterId": 115,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Brightshield",
+    "name": "Jacob 'Brightshield' Aldevaréz",
+    "firstName": "Jacob",
+    "lastName": "Aldevaréz",
+    "rank": "Captain (Merchant)",
+    "branch": "",
+    "occupation": "merch",
+    "color": "#ff8fa3",
+    "stats": {
+      "melee": 0,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 2
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/brightshield.png",
+    "quirks": [
+      "Pragmatic",
+      "Money Driven",
+      "Looser"
+    ],
+    "description": "Utility Jumpsuit",
+    "source": {
+      "characterId": 123,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Deck",
+    "name": "Isaac 'Deck' Cooper",
+    "firstName": "Isaac",
+    "lastName": "Cooper",
+    "rank": "1st. Lt",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#6aa6ff",
+    "stats": {
+      "melee": 0,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 6
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/deck.png",
+    "quirks": [
+      "Risk Averse"
+    ],
+    "description": "",
+    "source": {
+      "characterId": 95,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Gauge",
+    "name": "Elena 'Gauge' Vasquez",
+    "firstName": "Elena",
+    "lastName": "Vasquez",
+    "rank": "2nd Lt",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#3cc4b1",
+    "stats": {
+      "melee": 0,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 4
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/gauge.png",
+    "quirks": [
+      "Precision bombs",
+      "Gallows humour"
+    ],
+    "description": "",
+    "source": {
+      "characterId": 117,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Jukebox",
+    "name": "Desmond 'Jukebox' Blackwell",
+    "firstName": "Desmond",
+    "lastName": "Blackwell",
+    "rank": "2nd Lt.",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#5ec8e5",
+    "stats": {
+      "melee": 1,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 4
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      },
+      {
+        "name": "Survey Charts",
+        "qty": 2
+      }
+    ],
+    "img": "assets/tokens/player/jukebox.png",
+    "quirks": [
+      "Multitasker",
+      "Aversion to Silence"
+    ],
+    "description": "",
+    "source": {
+      "characterId": 59,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Shark",
+    "name": "Winnie 'Shark' Irons",
+    "firstName": "Winnie",
+    "lastName": "Irons",
+    "rank": "2nd Lt",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#f07a5a",
+    "stats": {
+      "melee": 0,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 5
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/shark.png",
+    "quirks": [
+      "Takes things too seriously",
+      "green"
+    ],
+    "description": "",
+    "source": {
+      "characterId": 94,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Shredder",
+    "name": "Dean 'Shredder' Markov",
+    "firstName": "Dean",
+    "lastName": "Markov",
+    "rank": "1st Lt",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#f2c14e",
+    "stats": {
+      "melee": 0,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 4
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      },
+      {
+        "name": "food",
+        "qty": 1
+      },
+      {
+        "name": "manifest",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/shredder.png",
+    "quirks": [
+      "Shock and awesome",
+      "Will brawl"
+    ],
+    "description": "",
+    "source": {
+      "characterId": 116,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
+    }
+  },
+  {
+    "callsign": "Tinker",
+    "name": "Petra 'Tinker' Kettunen",
+    "firstName": "Petra",
+    "lastName": "Kettunen",
+    "rank": "2nd Lt",
+    "branch": "TCSF",
+    "occupation": "p",
+    "color": "#9b8cff",
+    "stats": {
+      "melee": 1,
+      "martialArts": 0,
+      "dance": 0,
+      "athletic": 3
+    },
+    "weapon": "laser_rifle",
+    "inventory": [
+      {
+        "name": "Laser cell",
+        "qty": 2
+      },
+      {
+        "name": "Medkit",
+        "qty": 1
+      },
+      {
+        "name": "Telemetry_data",
+        "qty": 1
+      },
+      {
+        "name": "pilot",
+        "qty": 1
+      }
+    ],
+    "img": "assets/tokens/player/tinker.png",
+    "quirks": [
+      "Taciturn",
+      "Tinkerer"
+    ],
+    "description": "5 ft 3 in tall, with a small and slender frame, her green eyes are normally hidden behind some form of eyewear whether sunglasses or welding goggles and her red hair usually haphazardly tied back to protect it from the grease that can occasionally be found on her hands or face.  She has a preference for cargo pants and boots with collared shirts when not on duty.  On the rare occasion, people have seen her wear an amulet shaped as a metal disc with many swirls, and upon it the dark paw print of a bear.",
+    "source": {
+      "characterId": 16,
+      "snapshotAt": "2026-11-15T18:04:34+00:00"
     }
   }
 ];

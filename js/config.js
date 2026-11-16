@@ -78,6 +78,6 @@ window.MC_CONFIG = {
   heartbeatMs: 8000,      // host presence refresh
   playerPingMs: 10000,    // player presence refresh
   hostTimeoutMs: 32000,   // players consider the host gone after this
-  maxPlayers: 8,
+  maxPlayers: 16,
   snapshotRetain: true
 };

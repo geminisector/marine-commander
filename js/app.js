@@ -7,7 +7,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const CFG = window.MC_CONFIG || {};
-const MAX_PLAYERS = CFG.maxPlayers || 8;
+const MAX_PLAYERS = CFG.maxPlayers || 16;
 const STORE_KEY = 'marine-commander-solo-v4';
 const HOST_SAVE_KEY = 'marine-commander-host-save-v4';
 const CLIENT_KEY = 'marine-commander-client-id';
@@ -169,6 +169,7 @@ const WEAPONS = Object.freeze({
 const UNARMED = Object.freeze({ label: 'Unarmed', damage: 1, suckerDamage: 1.5, sucker: 'sucker-punched', verbs: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], type: 'melee' });
 const WEAPON_KEYS = Object.keys(WEAPONS);
 const HUMAN_TOKENS = 'assets/tokens/human/';
+const PLAYER_TOKENS = 'assets/tokens/player/';
 const KILRATHI_TOKENS = 'assets/tokens/kilrathi/';
 const HOSTILE_PRESETS = Object.freeze({
   Pilot:    { color: '#e5604f', stats: { melee: 5, martialArts: 2, dance: 0, athletic: 4 }, weapon: 'laser',   img: 'pilot.png',     inv: [{ name: 'Laser cell', qty: 2 }] },
@@ -613,14 +614,17 @@ function defaultTokens() {
   // The four built-in heroes are fixed characters: their names survive a player
   // taking the seat. Imported CombatBot characters are seated first.
   const hero = (name, color, x, y, stats, weapon, img, inv) =>
-    mk('player', name, color, x, y, 1, stats, weapon, HUMAN_TOKENS + img, inv);
-  const importedSpots = [[740, 300], [720, 311], [760, 320], [740, 280], [760, 280], [720, 340], [780, 300], [780, 340]];
+    mk('player', name, color, x, y, 1, stats, weapon, PLAYER_TOKENS + img, inv);
+  const importedSpots = [];
+  for (let row = 15; row <= 17; row++) for (let col = 45; col <= 48; col++) importedSpots.push(sq(col, row));
   const importedHero = (c, i) => {
     const [x, y] = importedSpots[i % importedSpots.length];
     const name = String(c.name || c.callsign || 'Imported character').trim().slice(0, 40);
     const color = /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#5ec8e5';
     const weapon = WEAPONS[c.weapon] ? c.weapon : 'laser_rifle';
-    const img = typeof c.img === 'string' ? c.img : '';
+    const img = typeof c.img === 'string' && c.img
+      ? (/^(?:data:|https?:|\/|assets\/)/i.test(c.img) ? c.img : PLAYER_TOKENS + c.img)
+      : '';
     return mk('player', name, color, x, y, 1, c.stats, weapon, img, normalizeInv(c.inventory));
   };
   const imported = IMPORTED_CHARACTERS.slice(0, MAX_PLAYERS).map(importedHero);
