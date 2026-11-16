@@ -13,7 +13,7 @@ window.MC_CHARACTERS = [
     "occupation": "p",
     "color": "#5ec8e5",
     "stats": {
-      "melee": 0,
+      "melee": 1,
       "martialArts": 0,
       "dance": 5,
       "athletic": 6
@@ -147,7 +147,7 @@ window.MC_CHARACTERS = [
         "qty": 1
       }
     ],
-    "img": "",
+    "img": "assets/tokens/player/megan.png",
     "quirks": [],
     "description": "",
     "source": {
@@ -392,8 +392,8 @@ window.MC_CHARACTERS = [
     "occupation": "p",
     "color": "#f2c14e",
     "stats": {
-      "melee": 0,
-      "martialArts": 0,
+      "melee": 4,
+      "martialArts": 2,
       "dance": 0,
       "athletic": 4
     },
