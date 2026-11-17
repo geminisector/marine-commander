@@ -115,6 +115,12 @@
         <button class="btn primary" id="placeUnit" type="button">Place on this deck</button>
         <button class="btn" id="placeParty" type="button">Move players here</button>
       </div>
+      <div class="field"><label for="spawnPlayerToken">Spawn player character</label>
+        <div class="row">
+          <select id="spawnPlayerToken" aria-label="Player character to spawn"></select>
+          <button class="btn tiny" id="spawnPlayer" type="button">Spawn</button>
+        </div>
+      </div>
       <div class="field"><label for="spawnRole">Spawn enemies</label>
         <div class="row">
           <select id="spawnRole" aria-label="Enemy role"></select>
@@ -125,7 +131,7 @@
       <div class="row">
         <button class="btn primary" id="beginMission" type="button">Begin mission</button>
       </div>
-      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Spawn preset enemies above, or create custom units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section. Players only see a deck when their character is on it; open a door or use <b>All lights on</b> to reveal a room.</div>
+      <div class="sub">Pick a deck with the Map selector, choose a unit, place it, then drag it to its spawn square. Player characters are not placed automatically: spawn the ones in this mission above, then assign them from the Live session roster. Spawn preset enemies above, or create custom units with <b>Add player token</b> / <b>Add hostile</b> in the Tokens section. Players only see a deck when their character is on it; open a door or use <b>All lights on</b> to reveal a room.</div>
     </section>
 
     <section class="sec gm-only" id="turnSec">

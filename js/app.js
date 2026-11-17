@@ -8,6 +8,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const CFG = window.MC_CONFIG || {};
 const MAX_PLAYERS = CFG.maxPlayers || 16;
+// Player tokens cap at MAX_PLAYERS, but extra people may still join as spectators.
+const MAX_CLIENTS = Math.max(MAX_PLAYERS, CFG.maxClients || 64);
 const STORE_KEY = 'marine-commander-solo-v4';
 const HOST_SAVE_KEY = 'marine-commander-host-save-v4';
 const CLIENT_KEY = 'marine-commander-client-id';
@@ -589,6 +591,61 @@ function isLit(x, y) {
   return dg.getImageData(px, py, 1, 1).data[3] < settings.dark * 255 * 0.55;
 }
 
+/* ---------- player character roster ---------- */
+// Player characters are not placed automatically. The GM spawns the ones taking
+// part in the mission, and only those tokens can be assigned to players.
+const CLASSIC_HEROES = Object.freeze([
+  {
+    name: "Leni 'Killmeister' Henari", color: '#3cc4b1',
+    stats: { melee: 11, martialArts: 0, dance: 7, athletic: 11 }, weapon: 'laser_rifle', img: 'killmeister.webp',
+    inventory: [{ name: 'Combat knife', qty: 1 }, { name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Frag grenade', qty: 1 }]
+  },
+  {
+    name: "Keyan 'Enforcer' Steele", color: '#6aa6ff',
+    stats: { melee: 6, martialArts: 0, dance: 0, athletic: 6 }, weapon: 'laser_rifle', img: 'enforcer-head.png',
+    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]
+  },
+  {
+    name: "Cyric 'Talon' Karde", color: '#f2a93b',
+    stats: { melee: 0, martialArts: 7, dance: 0, athletic: 5 }, weapon: 'laser_rifle', img: 'talon.jpg',
+    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]
+  },
+  {
+    name: "Derek 'Tinman' Miles", color: '#c58bff',
+    stats: { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, weapon: 'laser_rifle', img: 'tinman.webp',
+    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]
+  }
+]);
+function playerPortraitPath(c) {
+  if (typeof c.img !== 'string' || !c.img) return '';
+  return /^(?:data:|https?:|\/|assets\/)/i.test(c.img) ? c.img : PLAYER_TOKENS + c.img;
+}
+const PLAYER_PRESETS = (() => {
+  const out = [];
+  // Imported CombatBot characters come first; the four built-in heroes fill any
+  // remaining table slots. Every preset is spawned explicitly by the GM.
+  for (const c of IMPORTED_CHARACTERS.slice(0, MAX_PLAYERS)) {
+    const name = String(c.name || c.callsign || 'Imported character').trim().slice(0, 40);
+    if (!name) continue;
+    out.push({
+      key: name, name,
+      color: /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#5ec8e5',
+      stats: c.stats,
+      weapon: WEAPONS[c.weapon] ? c.weapon : 'laser_rifle',
+      img: playerPortraitPath(c),
+      inventory: normalizeInv(c.inventory)
+    });
+  }
+  for (const c of CLASSIC_HEROES) {
+    if (out.length >= MAX_PLAYERS) break;
+    out.push({
+      key: c.name, name: c.name, color: c.color, stats: c.stats, weapon: c.weapon,
+      img: PLAYER_TOKENS + c.img, inventory: cloneInventory(c.inventory)
+    });
+  }
+  return out;
+})();
+
 /* ---------- tokens ---------- */
 function defaultTokens() {
   nextId = 1;
@@ -611,41 +668,8 @@ function defaultTokens() {
     return mk('gm', role + (n ? ' ' + n : ''), preset.color, x, y, 1, preset.stats,
       preset.weapon, HUMAN_TOKENS + preset.img, cloneInventory(preset.inv));
   };
-  // The four built-in heroes are fixed characters: their names survive a player
-  // taking the seat. Imported CombatBot characters are seated first.
-  const hero = (name, color, x, y, stats, weapon, img, inv) =>
-    mk('player', name, color, x, y, 1, stats, weapon, PLAYER_TOKENS + img, inv);
-  const importedSpots = [];
-  for (let row = 15; row <= 17; row++) for (let col = 45; col <= 48; col++) importedSpots.push(sq(col, row));
-  const importedHero = (c, i) => {
-    const [x, y] = importedSpots[i % importedSpots.length];
-    const name = String(c.name || c.callsign || 'Imported character').trim().slice(0, 40);
-    const color = /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#5ec8e5';
-    const weapon = WEAPONS[c.weapon] ? c.weapon : 'laser_rifle';
-    const img = typeof c.img === 'string' && c.img
-      ? (/^(?:data:|https?:|\/|assets\/)/i.test(c.img) ? c.img : PLAYER_TOKENS + c.img)
-      : '';
-    return mk('player', name, color, x, y, 1, c.stats, weapon, img, normalizeInv(c.inventory));
-  };
-  const imported = IMPORTED_CHARACTERS.slice(0, MAX_PLAYERS).map(importedHero);
-  const classic = [
-    hero("Leni 'Killmeister' Henari", '#3cc4b1', 700, 300,
-      { melee: 11, martialArts: 0, dance: 7, athletic: 11 }, 'laser_rifle', 'killmeister.webp',
-      [{ name: 'Combat knife', qty: 1 }, { name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Frag grenade', qty: 1 }]),
-    hero("Keyan 'Enforcer' Steele", '#6aa6ff', 680, 311,
-      { melee: 6, martialArts: 0, dance: 0, athletic: 6 }, 'laser_rifle', 'enforcer-head.png',
-      [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
-    hero("Cyric 'Talon' Karde", '#f2a93b', 660, 300,
-      { melee: 0, martialArts: 7, dance: 0, athletic: 5 }, 'laser_rifle', 'talon.jpg',
-      [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]),
-    hero("Derek 'Tinman' Miles", '#c58bff', 680, 280,
-      { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, 'laser_rifle', 'tinman.webp',
-      [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }])
-  ];
+  // No player characters spawn here: the GM spawns the party during setup.
   return [
-    ...imported,
-    ...classic.slice(0, Math.max(0, MAX_PLAYERS - imported.length)),
-
     hostile('Pilot', 1, 40, 11),
     hostile('Pilot', 2, 37, 14),
     hostile('Pilot', 3, 27, 21),
@@ -1377,6 +1401,7 @@ $('#mapSelect').onchange = e => selectMap(e.target.value);
 $('#btnEndMission').onclick = endMission;
 $('#placeUnit').onclick = placeSetupUnit;
 $('#placeParty').onclick = movePlayersToDeck;
+$('#spawnPlayer').onclick = () => spawnPlayerCharacter($('#spawnPlayerToken').value);
 $('#spawnEnemies').onclick = () => spawnEnemies($('#spawnRole').value, $('#spawnCount').value);
 $('#beginMission').onclick = beginMission;
 
@@ -1470,10 +1495,69 @@ function populateSpawnRoles() {
   }
   sel.dataset.ready = '1';
 }
+function availablePlayerPresets() {
+  const spawned = new Set(tokens.filter(t => t.layer === 'player').map(t => t.name));
+  return PLAYER_PRESETS.filter(p => !spawned.has(p.name));
+}
+function populatePlayerSpawn() {
+  const sel = $('#spawnPlayerToken');
+  if (!sel) return;
+  const previous = sel.value;
+  const available = availablePlayerPresets();
+  sel.textContent = '';
+  if (!available.length) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = 'All player characters are spawned';
+    sel.append(o);
+  } else {
+    for (const p of available) {
+      const o = document.createElement('option');
+      o.value = p.key;
+      o.textContent = p.name;
+      sel.append(o);
+    }
+    if (previous && available.some(p => p.key === previous)) sel.value = previous;
+  }
+  sel.disabled = !available.length;
+  const btn = $('#spawnPlayer');
+  if (btn) btn.disabled = !available.length;
+}
+function spawnPlayerCharacter(key) {
+  if (!isHost() || !map) return;
+  const preset = PLAYER_PRESETS.find(p => p.key === key);
+  if (!preset) return;
+  if (tokens.some(t => t.layer === 'player' && t.name === preset.name)) {
+    showMsg(preset.name + ' is already on the table.');
+    return;
+  }
+  if (tokens.filter(t => t.layer === 'player').length >= MAX_PLAYERS) {
+    showMsg('The table is set for up to ' + MAX_PLAYERS + ' player tokens.');
+    return;
+  }
+  const slot = freeSpawnSlots(1, viewCenterWorld())[0] || viewCenterWorld();
+  const stats = normalizeStats(preset.stats, 'player', 1);
+  const maxHp = computeStats(stats).maxHp;
+  const t = {
+    id: nextId++, layer: 'player', mapKey: map.key, name: preset.name,
+    color: preset.color, size: 1, x: slot.x, y: slot.y, status: '',
+    hp: maxHp, maxHp, stats, weapon: preset.weapon,
+    inventory: cloneInventory(preset.inventory), img: preset.img
+  };
+  tokens.push(t);
+  loadTokImg(t);
+  selected = t.id;
+  logEvent(`GM spawns ${t.name} on ${map.name}.`);
+  const waiting = roster.some(r => r.online && (r.tokenId == null || !tokenById(r.tokenId)));
+  seatWaitingPlayers();
+  changed();
+  showMsg(`${t.name} spawned.${waiting ? ' A waiting player has been seated.' : ' Assign it from the Live session roster when a player is ready.'}`);
+}
 function renderSetup() {
   const sel = $('#setupToken');
   if (!sel || !map) return;
   populateSpawnRoles();
+  populatePlayerSpawn();
   const previous = sel.value;
   sel.textContent = '';
   const addGroup = (label, list) => {
@@ -1597,6 +1681,7 @@ function placeSetupUnit() {
 function movePlayersToDeck() {
   if (!isHost() || !map) return;
   const players = tokens.filter(t => t.layer === 'player');
+  if (!players.length) { showMsg('No player characters have been spawned yet. Use Spawn player character above.'); return; }
   const moving = players.filter(t => t.mapKey !== map.key);
   if (!moving.length) { showMsg('All player characters are already on this deck.'); return; }
   const slots = freeSpawnSlots(moving.length, viewCenterWorld());
@@ -2514,8 +2599,12 @@ function renderRoster() {
   if (sessionRole === 'solo') { sec.hidden = true; return; }
   sec.hidden = false;
   $('#roomLabel').textContent = roomCode || '—';
+  const playerTokens = tokens.filter(t => t.layer === 'player');
+  const freeSlots = playerTokens.filter(t => !roster.some(r => r.tokenId === t.id)).length;
   $('#hostLine').textContent = sessionRole === 'host'
-    ? (onlineCount() ? onlineCount() + ' player' + (onlineCount() === 1 ? '' : 's') + ' connected. Assign characters below.' : 'You are the GM. Share the invite so players can join.')
+    ? (onlineCount()
+      ? onlineCount() + ' player' + (onlineCount() === 1 ? '' : 's') + ' connected · ' + freeSlots + ' free character slot' + (freeSlots === 1 ? '' : 's') + '. Assign characters below.'
+      : 'You are the GM. Spawn player characters in Setup, then share the invite.')
     : ('GM: ' + (hostName || '…') + (me.tokenId ? '' : ' · waiting to be assigned a character'));
   const box = $('#roster'); box.textContent = '';
   if (sessionRole === 'host') {
@@ -2564,20 +2653,24 @@ function assignSeat(clientId, tokenId) {
 }
 function autoSeat(member) {
   if (member.tokenId && tokenById(member.tokenId)) return;
-  let t = tokens.find(x => x.layer === 'player' && !roster.some(r => r.tokenId === x.id));
-  if (!t && tokens.filter(x => x.layer === 'player').length < MAX_PLAYERS) {
-    const n = tokens.filter(x => x.layer === 'player').length;
-    const st = normalizeStats(null, 'player', 1), der = computeStats(st);
-    t = { id: nextId++, layer: 'player', mapKey: map ? map.key : DEFAULT_MAP_ID, status: '', hp: der.maxHp, maxHp: der.maxHp, stats: st, weapon: 'knife', name: member.name, color: ['#3cc4b1', '#6aa6ff', '#f2a93b', '#c58bff', '#58d68a', '#ff8fa3'][n % 6], size: 1, inventory: [{ name: 'Medkit', qty: 1 }], img: '', x: (map ? map.W / 2 : 552) + (n % 2) * 34, y: (map ? map.H / 2 : 300) + Math.floor(n / 2) * 22 };
-    snapTok(t); tokens.push(t); loadTokImg(t);
-  }
+  // Only characters the GM has spawned are available. Joining never creates a
+  // token: a player with no free character sits at the table as a spectator.
+  const t = tokens.find(x => x.layer === 'player' && !roster.some(r => r.tokenId === x.id));
   if (t) {
     roster.forEach(r => { if (r.clientId !== member.clientId && r.tokenId === t.id) r.tokenId = null; });
     member.tokenId = t.id;
     if (/^Player \d+$/.test(t.name)) t.name = member.name;
     logEvent(`${member.name} takes control of ${t.name}.`);
   } else {
-    logEvent(`${member.name} joins as a spectator (no free character).`);
+    logEvent(`${member.name} joins as a spectator (all player slots are taken).`);
+  }
+}
+function seatWaitingPlayers() {
+  for (const member of roster) {
+    if (!member.online) continue;
+    if (member.tokenId != null && tokenById(member.tokenId)) continue;
+    if (!tokens.some(x => x.layer === 'player' && !roster.some(r => r.tokenId === x.id))) return;
+    autoSeat(member);
   }
 }
 function kickPlayer(clientId) {
@@ -3044,7 +3137,7 @@ async function handleAction(msg) {
       autoSeat(member);
       if (!wasOffline && member.tokenId) { /* already seated */ }
     } else {
-      if (roster.length >= 16) { net.notify(clientId, 'The table is full.'); return; }
+      if (roster.length >= MAX_CLIENTS) { net.notify(clientId, 'The table is full.'); return; }
       member = { clientId, name, tokenId: null, online: true, lastSeen: now, joinedAt: now };
       roster.push(member);
       logEvent(`${name} joined the table.`);

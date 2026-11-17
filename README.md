@@ -78,8 +78,10 @@ security, because the password ships in the static client.
 2. Share the code or press **Copy invite**.
 3. Pick the deck from the **Map** selector in the header. Every player follows
    the host's map choice; tokens stay on the deck where they were left.
-4. Assign characters from the **Live session** roster (players are auto-seated
-   into a free player token when they join).
+4. Spawn the player characters taking part from **Setup → Spawn player
+   character**, then assign them from the **Live session** roster. Player
+   characters do not spawn automatically; a player who joins while every
+   spawned character is already assigned sits at the table as a spectator.
 5. Use **Turns** to give a token the turn, or **Next turn** to cycle through
    everyone alive. Set a per-turn movement limit if you want one. Players see
    their remaining **AP** (movement squares left) on their character sheet and
@@ -102,6 +104,12 @@ stairs yet. The Map selector chooses the deck being prepared.
 
 - Pick a unit in the **Setup** section and press **Place on this deck** to move
   it from another deck to the current one. Drag it to its spawn square.
+- **Spawn player character** creates the selected imported or built-in hero on
+  the current deck. Player characters are never placed automatically; spawn
+  only the party taking part, and spawn more later if a spectator joins and a
+  character becomes available. A joining player takes a free spawned character
+  automatically; if every spawned character is already assigned, they join as a
+  spectator.
 - **Move players here** moves every player character from other decks onto the
   current deck in a loose formation, ready to be dragged into position.
 - **Spawn enemies** creates any number of preset Pilots, Grunts, Navigators,
@@ -112,8 +120,9 @@ stairs yet. The Map selector chooses the deck being prepared.
   generic Kilrathi Scientist.
 - New generic units still come from **Tokens → Add player token / Add hostile**;
   they spawn on the current deck.
-- The updated Cortez placements in `defaultTokens()` remain the default whenever
-  the Cortez scene is reset or a new table starts.
+- The updated Cortez hostile placements in `defaultTokens()` remain the default
+  whenever the Cortez scene is reset or a new table starts. No player character
+  tokens are created by default.
 - Press **Begin mission** when ready. This starts the mission log; setup moves
   and placement are not counted as part of the mission.
 
@@ -241,7 +250,9 @@ storage keys.
 
 1. Enter a display name, choose **Join with a code**, and enter the GM's code
    (or open the invite link).
-2. Wait for the GM to assign a character (or ask for one from the sheet).
+2. Wait for the GM to spawn and assign a character (or ask for one from the
+   sheet). If every spawned character is already assigned, you join as a
+   spectator until a slot frees up.
 3. On your turn, drag your token to move. The **AP** meter on **Your character**
    shows how many movement squares are left this turn (∞ when the GM has set no
    limit). Press **End turn** to advance the table to the next character. Click a
@@ -271,8 +282,8 @@ character from its latest snapshot.
 
 `--img-dir` matches each character's callsign to a portrait with the same file
 name, ignoring extension, so run it against `assets/tokens/player/` whenever
-portraits change. Imported characters are seated before the four built-in
-heroes; older heroes fill any remaining player slots. The table supports 16
+portraits change. Imported characters appear first in the GM's **Spawn player
+character** list, followed by the four built-in heroes. The table supports 16
 player tokens. Use **Img** in a token row to replace a portrait manually.
 
 ## Combat

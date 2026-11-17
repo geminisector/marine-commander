@@ -79,5 +79,6 @@ window.MC_CONFIG = {
   playerPingMs: 10000,    // player presence refresh
   hostTimeoutMs: 32000,   // players consider the host gone after this
   maxPlayers: 16,
+  maxClients: 64,          // player + spectator roster cap; extra joiners spectate
   snapshotRetain: true
 };
