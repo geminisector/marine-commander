@@ -57,6 +57,7 @@ migrateLegacyKeys();
 
 let map = null, tokens = [], nextId = 1;
 let zones = [];                       // active smoke/fire areas, synced with snapshots
+let drops = [];                       // weapons and other loot lying on the deck
 let pendingGrenade = null;            // local targeting mode: { tokenId, itemName, kind, radius, x, y }
 const mapStates = new Map();       // map id -> { doors: bool[], lights: force[] }
 let snapshotLoading = false, pendingSnapshot = null;
@@ -192,6 +193,14 @@ function grenadeFor(name) {
 }
 function grenadeColor(kind) {
   return kind === 'flashbang' ? '#f5f7ff' : kind === 'smoke' ? '#a9b4c2' : kind === 'fire' ? '#ff8a3d' : '#ff5a45';
+}
+function grenadeThrowRange(t) {
+  const athletic = Math.max(0, Math.min(50, +((t && t.stats && t.stats.athletic) || 0)));
+  return athletic * 2;
+}
+function grenadeInRange(t, x, y) {
+  if (!t || !map) return false;
+  return Math.hypot(t.x - x, t.y - y) / map.ppg <= grenadeThrowRange(t) + 1e-6;
 }
 const EFFECT_LABELS = Object.freeze({ blinded: 'Blinded' });
 const HUMAN_TOKENS = 'assets/tokens/human/';
@@ -333,6 +342,16 @@ function cleanZone(z) {
     ownerId: Number.isFinite(+z.ownerId) ? +z.ownerId : null
   };
 }
+function cleanDrop(d) {
+  if (!d || !WEAPONS[d.weapon]) return null;
+  const mapKey = typeof d.mapKey === 'string' && d.mapKey ? d.mapKey : (map ? map.key : DEFAULT_MAP_ID);
+  return {
+    id: String(d.id || ('d' + Math.random().toString(36).slice(2))).slice(0, 40),
+    mapKey, weapon: d.weapon,
+    x: +d.x || 0, y: +d.y || 0,
+    droppedBy: Number.isFinite(+d.droppedBy) ? +d.droppedBy : null
+  };
+}
 function cleanToken(t) {
   const layer = t.layer === 'gm' ? 'gm' : 'player';
   const size = Math.max(1, Math.min(4, +t.size || 1));
@@ -462,7 +481,7 @@ function resetToDefaults() {
   map.lights.forEach(l => { l.force = null; });
   cacheCurrentMapState();
   nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; anim = null;
-  zones = []; pendingGrenade = null;
+  zones = []; drops = []; pendingGrenade = null;
   imgs.clear();
   tokens = map.key === 'cortez' ? defaultTokens() : [];
   syncTokenImages();
@@ -478,6 +497,7 @@ async function loadCustomMap(d) {
   mapStates.clear();
   tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} };
   zones = []; pendingGrenade = null;
+  drops = [];
   roster = []; logRows = []; selected = null; ruler = null;
   clearExplored(); cacheCurrentMapState();
   logEvent('Custom map loaded. It is local to this solo session.');
@@ -976,6 +996,7 @@ function makeSnapshot() {
     turn: { number: turn.number, activeId: turn.activeId, moved: Object.assign({}, turn.moved), attacked: Object.assign({}, turn.attacked) },
     tokens: tokens.map(cleanToken),
     zones: zones.map(cleanZone).filter(Boolean),
+    drops: drops.map(cleanDrop).filter(Boolean),
     doors: map ? map.doors.map(d => d.open) : [],
     lights: map ? map.lights.map(l => l.force) : [],
     mapStates: allMapStates(),
@@ -1034,6 +1055,7 @@ function applySnapshot(s, initial = false) {
   setupPhase = !!s.setup;
   tokens = (s.tokens || []).map(t => Object.assign(cleanToken(t), { plan: undefined }));
   zones = (Array.isArray(s.zones) ? s.zones : []).map(cleanZone).filter(Boolean);
+  drops = (Array.isArray(s.drops) ? s.drops : []).map(cleanDrop).filter(Boolean);
   nextId = Math.max(0, ...tokens.map(t => t.id)) + 1;
   syncTokenImages();
   if (s.mapStates) restoreMapStates(s.mapStates);
@@ -1128,8 +1150,19 @@ function drawZones(kind) {
 }
 function drawGrenadeAim() {
   if (!pendingGrenade || pendingGrenade.x == null || !map) return;
-  const r = pendingGrenade.radius * map.ppg, color = grenadeColor(pendingGrenade.kind);
+  const thrower = tokenById(pendingGrenade.tokenId);
+  const inRange = !thrower || grenadeInRange(thrower, pendingGrenade.x, pendingGrenade.y);
+  const r = pendingGrenade.radius * map.ppg, color = inRange ? grenadeColor(pendingGrenade.kind) : '#ff5a45';
   ctx.save();
+  if (thrower) {
+    const maxR = grenadeThrowRange(thrower) * map.ppg;
+    if (maxR > 0) {
+      ctx.beginPath(); ctx.arc(thrower.x, thrower.y, maxR, 0, 6.2832);
+      ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, 1.5 / view.k);
+      ctx.strokeStyle = 'rgba(242,169,59,.45)'; ctx.setLineDash([2 / view.k, 5 / view.k]);
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
   ctx.beginPath(); ctx.arc(pendingGrenade.x, pendingGrenade.y, r, 0, 6.2832);
   ctx.globalAlpha = 0.16; ctx.fillStyle = color; ctx.fill();
   ctx.globalAlpha = 1; ctx.lineWidth = Math.max(1.5, 2 / view.k); ctx.strokeStyle = color;
@@ -1139,6 +1172,28 @@ function drawGrenadeAim() {
   ctx.moveTo(pendingGrenade.x, pendingGrenade.y - 5 / view.k); ctx.lineTo(pendingGrenade.x, pendingGrenade.y + 5 / view.k);
   ctx.stroke();
   ctx.restore();
+}
+function dropVisible(d) {
+  if (role === 'gm') return true;
+  if (!fogActive()) return true;
+  return seenByPlayers(d.x, d.y) && isLit(d.x, d.y);
+}
+function drawDrops() {
+  if (!map) return;
+  for (const d of drops) {
+    if (d.mapKey !== map.key || !dropVisible(d)) continue;
+    const r = Math.max(map.ppg * 0.22, 4 / view.k);
+    ctx.save();
+    ctx.translate(d.x, d.y); ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = 'rgba(18,25,35,.92)'; ctx.strokeStyle = css('--accent');
+    ctx.lineWidth = Math.max(1, 1.6 / view.k);
+    ctx.beginPath(); ctx.rect(-r, -r, r * 2, r * 2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = css('--accent');
+    ctx.font = `600 ${Math.max(7, 9 / view.k)}px "IBM Plex Mono",monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('W', d.x, d.y + 0.5 / view.k);
+  }
 }
 
 function draw() {
@@ -1193,6 +1248,7 @@ function draw() {
 
   if (settings.fog && fogDirty) fogPass();
   if (fogActive()) { ctx.globalAlpha = role === 'gm' ? 0.72 : 1; ctx.drawImage(fog, 0, 0); ctx.globalAlpha = 1; }
+  drawDrops();
   drawZones('fire');
   drawGrenadeAim();
   for (const s of map.stairs || []) drawStair(s);
@@ -1543,7 +1599,7 @@ $('#file').addEventListener('change', e => { const f = e.target.files[0]; if (f)
 /* ---------- hint + tools ---------- */
 function setHint(extra) {
   const base = pendingGrenade
-    ? `Choose a target for ${pendingGrenade.itemName} · click the map · Esc cancels`
+    ? `Choose a target for ${pendingGrenade.itemName} · range ${fmt(grenadeThrowRange(tokenById(pendingGrenade.tokenId)))} sq · click the map · Esc cancels`
     : role === 'player'
     ? (tool === 'ruler' ? 'Drag to measure. Esc clears.'
       : setupPhase ? 'The GM is setting up the mission.'
@@ -1929,7 +1985,7 @@ function tokenRow(t) {
     const st = document.createElement('input'); st.type = 'text'; st.placeholder = 'Status (e.g. Wounded)'; st.value = t.status || ''; st.maxLength = 30;
     st.setAttribute('list', 'statusList'); st.setAttribute('aria-label', 'Status for ' + t.name);
     st.oninput = () => { t.status = st.value; touch(); };
-    st.onchange = () => changed();
+    st.onchange = () => { if (/^dead$/i.test(st.value)) dropWeapon(t); changed(); };
     st.onfocus = () => { selected = t.id; markSel(); invalidate(); };
     if (t.img) { const c = document.createElement('button'); c.type = 'button'; c.className = 'btn tiny'; c.textContent = 'Clear image'; c.onclick = () => { delete t.img; imgs.delete(t.id); changed(); }; l2.append(c); }
     l2.append(st); row.append(l2);
@@ -1937,6 +1993,7 @@ function tokenRow(t) {
   row.append(hpBlock(t, role === 'gm' || t.id === me.tokenId, role === 'gm'));
   if (role === 'gm' || t.id === me.tokenId) {
     row.append(combatRow(t));
+    const loot = lootRow(t); if (loot) row.append(loot);
     row.append(statsBlock(t, role === 'gm'));
   }
   if (role === 'gm' || t.id === me.tokenId) {
@@ -1996,6 +2053,124 @@ function combatRow(t) {
   meta.textContent = `${w.label} · ${w.type}` + (queued ? ' · awaiting GM' : settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · used' : '');
   row.append(b, meta);
   return row;
+}
+function withinLootReach(t, x, y, size = 1) {
+  if (!t || !map || t.mapKey !== map.key) return false;
+  const reach = (t.size + (size || 1)) / 2 + 0.5;
+  return Math.hypot(t.x - x, t.y - y) / map.ppg <= reach + 1e-6;
+}
+function addItemsToInventory(t, items) {
+  const merged = new Map(t.inventory.map(i => [i.name, { name: i.name, qty: i.qty }]));
+  for (const it of normalizeInv(items)) {
+    const cur = merged.get(it.name);
+    if (cur) cur.qty = Math.min(999, cur.qty + it.qty);
+    else merged.set(it.name, { name: it.name, qty: it.qty });
+  }
+  t.inventory = normalizeInv([...merged.values()]);
+}
+function lootSourcesFor(t) {
+  if (!t || !map || isDown(t) || t.mapKey !== map.key) return [];
+  const out = [];
+  for (const o of tokens) {
+    if (o.id === t.id || !isDown(o) || o.mapKey !== map.key) continue;
+    if (role === 'player' && !tokVisible(o)) continue;
+    const items = o.inventory.reduce((n, it) => n + it.qty, 0);
+    if (!items || !withinLootReach(t, o.x, o.y, o.size)) continue;
+    out.push({
+      kind: 'token', id: o.id,
+      label: `${o.name} · ${items} item${items === 1 ? '' : 's'}`,
+      title: `Take ${items} item${items === 1 ? '' : 's'} from ${o.name}`
+    });
+  }
+  for (const d of drops) {
+    if (d.mapKey !== map.key || weaponKeyOf(t) === d.weapon) continue;
+    if (role === 'player' && !dropVisible(d)) continue;
+    if (!withinLootReach(t, d.x, d.y, 1)) continue;
+    out.push({
+      kind: 'drop', id: d.id,
+      label: `Pick up ${WEAPONS[d.weapon].label}`,
+      title: `Pick up the dropped ${WEAPONS[d.weapon].label}`
+    });
+  }
+  return out.slice(0, 8);
+}
+function lootRow(t) {
+  if (!map || isDown(t) || t.mapKey !== map.key) return null;
+  const sources = lootSourcesFor(t);
+  if (!sources.length) return null;
+  const row = document.createElement('div'); row.className = 'l2 lootrow';
+  const label = document.createElement('span'); label.className = 'mono muted'; label.textContent = 'Loot';
+  row.append(label);
+  const myTurn = !settings.turnBased || role === 'gm' || turn.activeId === t.id;
+  const spent = settings.turnBased && turn.attacked && turn.attacked[t.id];
+  for (const source of sources) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny';
+    b.textContent = source.label;
+    b.disabled = spent || !myTurn || (role === 'player' && (!hostOnline || netState !== 'live'));
+    b.title = spent ? `${t.name} has already used their attack this turn.`
+      : !myTurn ? `Wait for ${t.name}'s turn.`
+      : source.title + ' · costs 1 attack';
+    b.onclick = () => requestLoot(t, source);
+    row.append(b);
+  }
+  return row;
+}
+function requestLoot(t, source) {
+  if (!t || !source) return;
+  if (role === 'player') {
+    if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+    net.sendAction({ type: 'loot', tokenId: t.id, sourceKind: source.kind, sourceId: source.id })
+      .catch(() => showMsg('Could not send the loot action. Check your connection.'));
+    showMsg(`Looting ${source.label}…`);
+    return;
+  }
+  const result = performLoot(t, source);
+  if (result.error) { showMsg(result.error); return; }
+  changed();
+  showMsg(result.text);
+}
+function performLoot(looter, source) {
+  if (!looter || !map) return { error: 'No character or deck.' };
+  if (setupPhase) return { error: 'Begin the mission before looting.' };
+  if (isDown(looter)) return { error: `${looter.name} is down.` };
+  if (looter.mapKey !== map.key) return { error: 'That character is on another deck.' };
+  if (settings.turnBased && turn.attacked && turn.attacked[looter.id]) {
+    return { error: `${looter.name} has already used their attack this turn.` };
+  }
+  if (!source) return { error: 'That loot is no longer there.' };
+  if (source.kind === 'token') {
+    const target = tokenById(+source.id);
+    if (!target || !isDown(target) || target.mapKey !== map.key) return { error: 'That character is no longer lootable.' };
+    if (!withinLootReach(looter, target.x, target.y, target.size)) return { error: 'Move closer to loot that character.' };
+    const items = normalizeInv(target.inventory);
+    if (!items.length) return { error: 'There is nothing left to loot.' };
+    if (weaponKeyOf(target)) dropWeapon(target, false);
+    addItemsToInventory(looter, items);
+    target.inventory = [];
+    const names = items.map(i => i.qty > 1 ? `${i.name} ×${i.qty}` : i.name).join(', ');
+    missionToken(looter).items.push(...items.map(i => i.name));
+    recordMissionAction(looter, `Looted ${names} from ${target.name}.`);
+    logEvent(`${looter.name} loots ${names} from ${target.name}.`);
+    if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[looter.id] = true; }
+    return { text: `${looter.name} loots ${names} from ${target.name}.` };
+  }
+  if (source.kind === 'drop') {
+    const drop = drops.find(d => d.id === source.id);
+    if (!drop || drop.mapKey !== map.key) return { error: 'That dropped weapon is no longer there.' };
+    if (!withinLootReach(looter, drop.x, drop.y, 1)) return { error: 'Move closer to pick that up.' };
+    const old = weaponKeyOf(looter);
+    if (old === drop.weapon) return { error: `${looter.name} is already carrying a ${WEAPONS[drop.weapon].label}.` };
+    if (old) dropWeapon(looter, false);
+    looter.weapon = drop.weapon;
+    drops = drops.filter(d => d !== drop);
+    const picked = WEAPONS[drop.weapon].label;
+    const swapped = old ? ` and drops their ${WEAPONS[old].label}` : '';
+    recordMissionAction(looter, `Picked up a ${picked}${swapped}.`);
+    logEvent(`${looter.name} picks up the dropped ${picked}${swapped}.`);
+    if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[looter.id] = true; }
+    return { text: `${looter.name} picks up the ${picked}${swapped}.` };
+  }
+  return { error: 'That loot is no longer there.' };
 }
 function resolveQueuedPlayerAttack(id) {
   const entry = pendingPlayerAttacks.get(id);
@@ -2222,8 +2397,8 @@ function dealCombatDamage(target, amount, messages) {
   if (missionDamageCtx) missionDamageCtx.push({ targetId: target.id, amount: dmg });
   messages.push(`${target.name} takes ${dmg} damage (${target.hp}/${target.maxHp}).`);
   if (weaponKeyOf(target)) {
-    messages.push(`${target.name} is disarmed.`);
-    target.weapon = '';
+    const dropped = dropWeapon(target, false);
+    messages.push(`${target.name} is disarmed and drops their ${WEAPONS[dropped].label}.`);
   }
   return dmg;
 }
@@ -2547,6 +2722,19 @@ function hpBlock(t, canEdit, canEditMax) {
   wrap.append(r, meter);
   return wrap;
 }
+function dropWeapon(t, announce = true) {
+  const key = weaponKeyOf(t);
+  if (!key) return '';
+  t.weapon = '';
+  const d = cleanDrop({
+    id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    mapKey: t.mapKey || (map ? map.key : DEFAULT_MAP_ID),
+    weapon: key, x: t.x, y: t.y, droppedBy: t.id
+  });
+  if (d) drops.push(d);
+  if (announce) logEvent(`${t.name} drops their ${WEAPONS[key].label}.`);
+  return key;
+}
 function setHp(t, value) {
   const prev = t.hp;
   const prePct = t.maxHp > 0 ? (prev * 100) / t.maxHp : 0;
@@ -2557,7 +2745,10 @@ function setHp(t, value) {
   const notices = [];
   if (t.hp < prev) updateHealthStatus(t, prePct, postPct, notices);
   for (const n of notices) logEvent(n);
-  if (prev > 0 && t.hp === 0) logEvent(`${t.name} is down!`);
+  if (prev > 0 && t.hp === 0) {
+    dropWeapon(t);
+    logEvent(`${t.name} is down!`);
+  }
 }
 function damageToken(t, amount, source, reason) {
   if (!t || isDown(t)) return 0;
@@ -2645,6 +2836,10 @@ function executeGrenade(t, itemName, x, y) {
   if (idx < 0 || t.inventory[idx].qty <= 0) return { ok: false, reason: 'That grenade is no longer in the inventory.' };
   x = Math.max(0, Math.min(map.W, +x || 0));
   y = Math.max(0, Math.min(map.H, +y || 0));
+  const range = grenadeThrowRange(t);
+  if (!grenadeInRange(t, x, y)) {
+    return { ok: false, reason: `Out of range: ${t.name} can throw a grenade up to ${fmt(range)} squares.` };
+  }
   const it = t.inventory[idx];
   it.qty--;
   if (it.qty <= 0) t.inventory.splice(idx, 1);
@@ -2697,7 +2892,7 @@ function startGrenadeTarget(t, idx) {
   pendingGrenade = { tokenId: t.id, itemName: it.name, kind: g.kind, radius: g.radius, x: null, y: null };
   cv.focus({ preventScroll: true });
   setHint(null); invalidate();
-  showMsg(`Choose a target for ${it.name} · click the map, Esc cancels.`);
+  showMsg(`Choose a target for ${it.name} · range ${fmt(grenadeThrowRange(t))} sq · click the map, Esc cancels.`);
 }
 function cancelGrenadeTarget() {
   if (!pendingGrenade) return;
@@ -2709,9 +2904,15 @@ function resolvePendingGrenade(w) {
   const target = snapRuler(w);
   target.x = Math.max(0, Math.min(map.W, target.x));
   target.y = Math.max(0, Math.min(map.H, target.y));
-  pendingGrenade = null; setHint(null); invalidate();
   const t = tokenById(p.tokenId);
-  if (!t) { showMsg('That character is no longer on the table.'); return; }
+  if (!t) { pendingGrenade = null; setHint(null); invalidate(); showMsg('That character is no longer on the table.'); return; }
+  if (!grenadeInRange(t, target.x, target.y)) {
+    p.x = target.x; p.y = target.y;
+    setHint(null); invalidate();
+    showMsg(`Out of range: ${t.name} can throw a grenade up to ${fmt(grenadeThrowRange(t))} squares.`);
+    return;
+  }
+  pendingGrenade = null; setHint(null); invalidate();
   if (role === 'player') {
     net && net.sendAction({ type: 'throwGrenade', tokenId: t.id, name: p.itemName, x: target.x, y: target.y })
       .catch(() => showMsg('Could not send the grenade. Check your connection.'));
@@ -2903,6 +3104,7 @@ function renderSheet() {
   hud.append(ap, turnBtn); body.append(hud);
   body.append(hpBlock(t, true, false));
   body.append(combatRow(t));
+  const loot = lootRow(t); if (loot) body.append(loot);
   body.append(statsBlock(t, false));
   const inv = document.createElement('div'); inv.className = 'invbox';
   const lab = document.createElement('div'); lab.className = 'invhead'; lab.append(Object.assign(document.createElement('span'), { textContent: 'Inventory' }));
@@ -3626,6 +3828,18 @@ async function handleAction(msg) {
       net.notify(clientId, `${itemName} thrown.`);
       changed(); return;
     }
+    case 'loot': {
+      if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only loot with your own character.'); return; }
+      if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
+      if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
+      if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
+      if (settings.turnBased && turn.attacked && turn.attacked[own.id]) { net.notify(clientId, 'You have already attacked this turn.'); scheduleSync(); return; }
+      const source = { kind: String(action.sourceKind || ''), id: action.sourceId };
+      const result = performLoot(own, source);
+      if (result.error) { net.notify(clientId, result.error); scheduleSync(); return; }
+      net.notify(clientId, result.text);
+      changed(); return;
+    }
     case 'attack': {
       if (!own || +action.attackerId !== own.id) { net.notify(clientId, 'You can only attack with your own character.'); return; }
       if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
@@ -3955,7 +4169,7 @@ const bootMapPromise = loadDefaultMap().catch(err => {
   bootStatus(err.message || 'Could not load the map.', 'err');
 });
 window.__marineCommander = {
-  get map() { return map; }, get tokens() { return tokens; }, get zones() { return zones; }, get settings() { return settings; },
+  get map() { return map; }, get tokens() { return tokens; }, get zones() { return zones; }, get drops() { return drops; }, get settings() { return settings; },
   get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; }, get setupPhase() { return setupPhase; },
   get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
   get mission() { return mission; }, buildMissionReport, visibleAt: seenByPlayers,

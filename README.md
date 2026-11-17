@@ -35,12 +35,12 @@ Vercel. `index.html` is the entry point.
 ## How live sync works
 
 - The host's browser is authoritative. It publishes an encrypted snapshot of
-  the whole table (tokens, zones, doors, lights, turns, roster, log) to an MQTT
-  topic.
+  the whole table (tokens, zones, drops, doors, lights, turns, roster, log) to
+  an MQTT topic.
 - Players subscribe to that topic and send small action messages back
-  (`move`, `hp`, `inventory`, `useItem`, `throwGrenade`, `requestDoor`, `chat`,
-  `join`). The host validates ownership and turn order, applies the action, and
-  publishes a fresh snapshot.
+  (`move`, `hp`, `inventory`, `useItem`, `throwGrenade`, `loot`, `requestDoor`,
+  `chat`, `join`). The host validates ownership and turn order, applies the
+  action, and publishes a fresh snapshot.
 - Messages are encrypted end-to-end with AES-GCM. The key is derived from the
   session code, so the public relay only sees ciphertext.
 - The latest snapshot is **retained** by the broker, so late joiners get the
@@ -139,9 +139,10 @@ room is unlit.
 
 Grenades are inventory items. Press **Throw** on a grenade, then click the target
 square; press **Esc** to cancel. The GM can throw with any token, while a player
-can only throw their own grenade on their own turn. Added item names autocomplete
-from the inventory list, and the GM can also add grenades from a token's
-inventory.
+can only throw their own grenade on their own turn. A throw's maximum range is 2
+squares per point of the thrower's **Athletic** stat. Added item names
+autocomplete from the inventory list, and the GM can also add grenades from a
+token's inventory.
 
 - **Flashbang** — 3-square radius. Every token in the area is **Blinded** for 3
   of its own turns. A blinded character's sight range drops to 1 square.
@@ -156,6 +157,20 @@ Durations count unit turns, not the table's global turn counter: blindness
 counts down at the end of the affected unit's turns, while fire and smoke last
 for five player-character turns. Fire damage on the fifth player turn still
 applies before the zone expires.
+
+### Looting
+
+A character that is disarmed drops their weapon on the square where they were
+hit. Going down or dying also drops the equipped weapon, and a downed or dead
+character's remaining inventory stays on their token and can be looted. Living
+characters see **Loot** buttons for nearby dropped weapons and downed/dead
+tokens within melee reach.
+
+Looting costs one attack, using the same once-per-turn attack budget as
+attacking. Looted inventory stacks merge into the looter's inventory. Picking up
+a dropped weapon equips it and drops the looter's previous weapon at their
+current square. Players can loot with their own living character on their turn;
+the GM can loot with any living token.
 
 ### Mission reports
 
