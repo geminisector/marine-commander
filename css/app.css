@@ -81,6 +81,16 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;margin:0}
 .phase{position:absolute;right:10px;top:10px;padding:5px 12px;border-radius:999px;border:1px solid;background:rgba(18,25,35,.94);font:600 12px/1.2 var(--f-head);letter-spacing:.08em;text-transform:uppercase}
 .phase[data-phase=player]{color:var(--player);border-color:var(--player)}
 .phase[data-phase=enemy]{color:var(--gm);border-color:var(--gm)}
+.aphud{position:absolute;left:10px;bottom:42px;display:inline-flex;align-items:center;gap:8px;
+  border:1px solid var(--line);border-radius:6px;background:rgba(18,25,35,.94);padding:5px 9px;
+  pointer-events:none;font:600 12px/1 var(--f-head);z-index:2}
+.aphud b{font:600 9px/1 var(--f-mono);letter-spacing:.14em;color:var(--accent)}
+.aphud .apnum{font:600 16px/1 var(--f-head);min-width:1.2em;text-align:right}
+.aphud .apbar{width:46px;height:5px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.aphud .apbar i{display:block;height:100%;width:100%;background:var(--accent)}
+.aphud[data-turn=true]{border-color:var(--accent);box-shadow:0 0 0 1px rgba(242,169,59,.22)}
+.aphud[data-empty=true] b,.aphud[data-empty=true] .apnum{color:#ff9b8f}
+.aphud[data-empty=true] .apbar i{background:var(--gm)}
 .hpin{width:56px;min-height:30px;padding:4px 6px}
 .tiny{font-size:12px;padding:3px 8px;min-height:26px;white-space:nowrap}
 .sub{font-size:12px;color:var(--muted);margin:2px 0 -4px}

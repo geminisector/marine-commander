@@ -85,8 +85,8 @@ security, because the password ships in the static client.
 5. Use **Turns** to give a token the turn, or **Next turn** to cycle through
    everyone alive. Set a per-turn movement limit if you want one. Players see
    their remaining **AP** (movement squares left) on their character sheet and
-   can press **End turn** there; the host only accepts that for the player whose
-   turn is actually active.
+   in an on-map meter while it is their turn, and can press **End turn** there;
+   the host only accepts that for the player whose turn is actually active.
 6. Click a door to open/close it, click a bulb to cycle its light, drag tokens
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
    the table log. **Clear all hostiles** in the Tokens section removes every GM
@@ -254,11 +254,11 @@ storage keys.
    sheet). If every spawned character is already assigned, you join as a
    spectator until a slot frees up.
 3. On your turn, drag your token to move. The **AP** meter on **Your character**
-   shows how many movement squares are left this turn (∞ when the GM has set no
-   limit). Press **End turn** to advance the table to the next character. Click a
-   door or light bulb to ask the GM to open/close the door or switch the light.
-   Use items or edit your own HP and inventory from **Your character**. The table
-   log has chat.
+   and the on-map **AP** indicator show how many movement squares are left this
+   turn (∞ when the GM has set no limit). Press **End turn** to advance the table
+   to the next character. Click a door or light bulb to ask the GM to open/close
+   the door or switch the light. Use items or edit your own HP and inventory from
+   **Your character**. The table log has chat.
 
 ### Importing CombatBot characters
 

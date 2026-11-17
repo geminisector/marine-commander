@@ -2532,6 +2532,28 @@ function actionPointLabel(t) {
   const ap = actionPoints(t);
   return ap === Infinity ? '∞' : fmt(ap);
 }
+function renderApHud() {
+  const el = $('#apHud');
+  if (!el) return;
+  const t = sessionRole === 'player' ? tokenById(me.tokenId) : null;
+  if (!t || setupPhase || !settings.turnBased || turn.activeId !== t.id) {
+    el.hidden = true;
+    return;
+  }
+  const ap = actionPoints(t);
+  const unlimited = settings.moveLimit <= 0;
+  const left = unlimited ? '∞' : fmt(ap);
+  el.hidden = false;
+  el.dataset.turn = 'true';
+  el.dataset.empty = (!unlimited && ap <= 0) ? 'true' : 'false';
+  $('#apHudValue').textContent = left;
+  $('#apHudBar').style.width = (unlimited ? 100 : Math.max(0, Math.min(100, (ap / settings.moveLimit) * 100))) + '%';
+  const label = unlimited
+    ? 'Action points: movement is unlimited this turn.'
+    : `Action points: ${fmt(ap)} of ${fmt(settings.moveLimit)} left this turn.`;
+  el.setAttribute('aria-label', label);
+  el.title = label;
+}
 function endPlayerTurn(t) {
   if (!t || !settings.turnBased) return;
   if (setupPhase) { showMsg('Begin the mission before ending a turn.'); return; }
@@ -2959,6 +2981,7 @@ function endMission() {
   changed();
 }
 function updateTurnUI() {
+  renderApHud();
   const active = tokenById(turn.activeId);
   const turnHost = role === 'gm';
   const pill = $('#turnPill'), phase = $('#phasePill');
