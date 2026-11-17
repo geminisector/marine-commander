@@ -2607,7 +2607,7 @@ function inventoryEditor(t, editable) {
     }
     box.append(chip);
   });
-  if (editable) {
+  if (editable && isHost()) {
     const add = document.createElement('div'); add.className = 'invadd';
     const nm = document.createElement('input'); nm.type = 'text'; nm.maxLength = 36; nm.placeholder = 'Add item'; nm.setAttribute('list', 'itemList'); nm.setAttribute('aria-label', 'New inventory item for ' + t.name);
     const qty = document.createElement('input'); qty.type = 'number'; qty.min = 1; qty.max = 999; qty.value = 1; qty.className = 'qtyin'; qty.setAttribute('aria-label', 'Quantity');
@@ -2628,6 +2628,13 @@ function commitInventory(t) {
   t.inventory = normalizeInv(t.inventory);
   if (role === 'player') net && net.sendAction({ type: 'inventory', tokenId: t.id, inventory: t.inventory }).catch(() => {});
   else changed();
+}
+function inventoryOnlyShrinks(current, next) {
+  const before = new Map(normalizeInv(current).map(i => [i.name, i.qty]));
+  const after = new Map();
+  for (const i of normalizeInv(next)) after.set(i.name, (after.get(i.name) || 0) + i.qty);
+  for (const [name, qty] of after) if (qty > (before.get(name) || 0)) return false;
+  return true;
 }
 function executeGrenade(t, itemName, x, y) {
   if (!t || !map) return { ok: false, reason: 'No character or deck.' };
@@ -3586,7 +3593,12 @@ async function handleAction(msg) {
     }
     case 'inventory': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only change your own inventory.'); return; }
-      own.inventory = normalizeInv(action.inventory); changed(); return;
+      const next = normalizeInv(action.inventory);
+      if (!inventoryOnlyShrinks(own.inventory, next)) {
+        net.notify(clientId, 'Only the GM can add items to your inventory.');
+        scheduleSync(); return;
+      }
+      own.inventory = next; changed(); return;
     }
     case 'useItem': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use your own items.'); return; }

@@ -280,8 +280,8 @@ storage keys.
    and the on-map **AP** indicator show how many movement squares are left this
    turn (∞ when the GM has set no limit). Press **End turn** to advance the table
    to the next character. Click a door or light bulb to ask the GM to open/close
-   the door or switch the light. Use items or edit your own HP and inventory from
-   **Your character**. The table log has chat.
+   the door or switch the light. Use items and edit your own HP from **Your
+   character**; only the GM can add new inventory items. The table log has chat.
 
 ### Importing CombatBot characters
 
@@ -400,6 +400,7 @@ loaded in **Solo GM** mode.
   Use a private broker if you need stronger isolation.
 - Saves: solo state is in `localStorage`; host checkpoints are in `localStorage`
   keyed separately; players do not persist the table.
-- HP/inventory are cooperative: players can edit their own character, while the
-  host can edit anyone. The host remains authoritative for all state.
+- HP and inventory are cooperative: players can edit their own HP and remove
+  their own items, but only the GM can add inventory items. The host remains
+  authoritative for all state.
 
