@@ -56,6 +56,8 @@ const MIN_ROOM = 9;
 migrateLegacyKeys();
 
 let map = null, tokens = [], nextId = 1;
+let zones = [];                       // active smoke/fire areas, synced with snapshots
+let pendingGrenade = null;            // local targeting mode: { tokenId, itemName, kind, radius, x, y }
 const mapStates = new Map();       // map id -> { doors: bool[], lights: force[] }
 let snapshotLoading = false, pendingSnapshot = null;
 let view = { x: 0, y: 0, k: 1 }, fitted = false;
@@ -170,6 +172,28 @@ const WEAPONS = Object.freeze({
 });
 const UNARMED = Object.freeze({ label: 'Unarmed', damage: 1, suckerDamage: 1.5, sucker: 'sucker-punched', verbs: ['punched', 'kicked', 'roundhoused', 'struck', 'smashed'], type: 'melee' });
 const WEAPON_KEYS = Object.keys(WEAPONS);
+// Grenade rules. Durations tick on the affected unit's own turns, never on the
+// table's global turn counter.
+const GRENADES = Object.freeze({
+  'Flashbang':      { kind: 'flashbang', label: 'Flashbang',      radius: 3, turns: 3, sight: 1 },
+  'Smoke grenade':  { kind: 'smoke',     label: 'Smoke',          radius: 3, turns: 5 },
+  'Fire grenade':   { kind: 'fire',      label: 'Fire',           radius: 3, turns: 5, damage: 2 },
+  'Frag grenade':   { kind: 'frag',      label: 'Fragmentation',  radius: 4, damage: 5 }
+});
+const GRENADE_ALIASES = Object.freeze({
+  'flashbang': 'Flashbang', 'flash bang': 'Flashbang', 'flash grenade': 'Flashbang',
+  'smoke': 'Smoke grenade', 'smoke grenade': 'Smoke grenade',
+  'fire': 'Fire grenade', 'fire grenade': 'Fire grenade', 'incendiary grenade': 'Fire grenade',
+  'frag': 'Frag grenade', 'frag grenade': 'Frag grenade', 'fragmentation grenade': 'Frag grenade'
+});
+function grenadeFor(name) {
+  const key = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return GRENADES[GRENADE_ALIASES[key]] || null;
+}
+function grenadeColor(kind) {
+  return kind === 'flashbang' ? '#f5f7ff' : kind === 'smoke' ? '#a9b4c2' : kind === 'fire' ? '#ff8a3d' : '#ff5a45';
+}
+const EFFECT_LABELS = Object.freeze({ blinded: 'Blinded' });
 const HUMAN_TOKENS = 'assets/tokens/human/';
 const PLAYER_TOKENS = 'assets/tokens/player/';
 const KILRATHI_TOKENS = 'assets/tokens/kilrathi/';
@@ -277,6 +301,38 @@ function normalizeInv(inv) {
       qty: Math.max(0, Math.min(999, Math.round(+x.qty || 0)))
     })).filter(x => x.qty > 0);
 }
+function normalizeEffects(list) {
+  const out = new Map();
+  for (const e of Array.isArray(list) ? list : []) {
+    if (!e || !EFFECT_LABELS[e.kind]) continue;
+    const turns = Math.max(1, Math.min(99, Math.round(+e.turnsLeft || 1)));
+    out.set(e.kind, Math.max(out.get(e.kind) || 0, turns));
+  }
+  return [...out].map(([kind, turnsLeft]) => ({ kind, turnsLeft }));
+}
+function statusText(t) {
+  const parts = [];
+  const manual = String((t && t.status) || '').trim();
+  if (manual) parts.push(manual);
+  for (const e of normalizeEffects(t && t.effects)) parts.push(`${EFFECT_LABELS[e.kind]} ${e.turnsLeft}`);
+  return parts.join(' · ');
+}
+function sightSquaresFor(t) {
+  const blinded = normalizeEffects(t && t.effects).some(e => e.kind === 'blinded');
+  return blinded ? Math.min(settings.sight, 1) : settings.sight;
+}
+function cleanZone(z) {
+  if (!z || (z.kind !== 'fire' && z.kind !== 'smoke')) return null;
+  const mapKey = typeof z.mapKey === 'string' && z.mapKey ? z.mapKey : (map ? map.key : DEFAULT_MAP_ID);
+  return {
+    id: String(z.id || ('z' + Math.random().toString(36).slice(2))).slice(0, 40),
+    kind: z.kind, mapKey,
+    x: +z.x || 0, y: +z.y || 0,
+    radius: Math.max(1, Math.min(12, +z.radius || 3)),
+    turnsLeft: Math.max(0, Math.min(99, Math.round(+z.turnsLeft || 0))),
+    ownerId: Number.isFinite(+z.ownerId) ? +z.ownerId : null
+  };
+}
 function cleanToken(t) {
   const layer = t.layer === 'gm' ? 'gm' : 'player';
   const size = Math.max(1, Math.min(4, +t.size || 1));
@@ -293,7 +349,7 @@ function cleanToken(t) {
     hp, maxHp,
     stats, weapon: WEAPONS[t.weapon] ? t.weapon : '',
     status: String(t.status || '').slice(0, 30), img: typeof t.img === 'string' ? t.img : '',
-    inventory: normalizeInv(t.inventory)
+    inventory: normalizeInv(t.inventory), effects: normalizeEffects(t.effects)
   };
 }
 
@@ -406,6 +462,7 @@ function resetToDefaults() {
   map.lights.forEach(l => { l.force = null; });
   cacheCurrentMapState();
   nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; anim = null;
+  zones = []; pendingGrenade = null;
   imgs.clear();
   tokens = map.key === 'cortez' ? defaultTokens() : [];
   syncTokenImages();
@@ -420,6 +477,7 @@ async function loadCustomMap(d) {
   resetMission();
   mapStates.clear();
   tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} };
+  zones = []; pendingGrenade = null;
   roster = []; logRows = []; selected = null; ruler = null;
   clearExplored(); cacheCurrentMapState();
   logEvent('Custom map loaded. It is local to this solo session.');
@@ -535,6 +593,15 @@ function rebuildBlockers() {
 }
 
 /* ---------- lighting ---------- */
+function smokeZones() {
+  return map ? zones.filter(z => z.kind === 'smoke' && z.mapKey === map.key) : [];
+}
+function inSmoke(x, y, mapKey) {
+  const key = mapKey || (map ? map.key : '');
+  const ppg = (MAP_BY_ID.get(key) || {}).ppg || (map ? map.ppg : 16);
+  return zones.some(z => z.kind === 'smoke' && z.mapKey === key &&
+    Math.hypot(x - z.x, y - z.y) <= z.radius * ppg);
+}
 function visPoly(ox, oy, R) {
   const segs = map.blockers.filter(s => !(Math.max(s[0], s[2]) < ox - R || Math.min(s[0], s[2]) > ox + R || Math.max(s[1], s[3]) < oy - R || Math.min(s[1], s[3]) > oy + R));
   const B = R * 1.05;
@@ -603,17 +670,17 @@ const CLASSIC_HEROES = Object.freeze([
   {
     name: "Keyan 'Enforcer' Steele", color: '#6aa6ff',
     stats: { melee: 6, martialArts: 0, dance: 0, athletic: 6 }, weapon: 'laser_rifle', img: 'enforcer-head.png',
-    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]
+    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Flashbang', qty: 1 }]
   },
   {
     name: "Cyric 'Talon' Karde", color: '#f2a93b',
     stats: { melee: 0, martialArts: 7, dance: 0, athletic: 5 }, weapon: 'laser_rifle', img: 'talon.jpg',
-    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }]
+    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Medkit', qty: 1 }, { name: 'Smoke grenade', qty: 1 }]
   },
   {
     name: "Derek 'Tinman' Miles", color: '#c58bff',
     stats: { melee: 7, martialArts: 8, dance: 0, athletic: 9 }, weapon: 'laser_rifle', img: 'tinman.webp',
-    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]
+    inventory: [{ name: 'Laser cell', qty: 2 }, { name: 'Frag grenade', qty: 1 }, { name: 'Fire grenade', qty: 1 }, { name: 'Medkit', qty: 1 }]
   }
 ]);
 function playerPortraitPath(c) {
@@ -708,16 +775,47 @@ function visionTokens() {
   return alive;
 }
 const polyPath = (c, poly) => { c.beginPath(); c.moveTo(poly[0][0], poly[0][1]); for (let i = 1; i < poly.length; i++) c.lineTo(poly[i][0], poly[i][1]); c.closePath(); };
+function drawSmokeShadow(canvas, t) {
+  const smoke = smokeZones();
+  if (!smoke.length) return;
+  const prev = canvas.globalCompositeOperation;
+  canvas.globalCompositeOperation = 'source-over';
+  canvas.fillStyle = '#000';
+  const L = Math.hypot(map.W, map.H);
+  for (const z of smoke) {
+    const r = z.radius * map.ppg;
+    const dx = z.x - t.x, dy = z.y - t.y, d = Math.hypot(dx, dy);
+    if (d <= r + 1e-6) {
+      canvas.beginPath(); canvas.arc(z.x, z.y, r, 0, 6.2832); canvas.fill();
+      continue;
+    }
+    const base = Math.atan2(dy, dx), cp = base + Math.PI;
+    const spread = Math.acos(Math.min(1, r / d));
+    const a1 = cp + spread, a2 = cp - spread;
+    const t1 = [z.x + Math.cos(a1) * r, z.y + Math.sin(a1) * r];
+    const t2 = [z.x + Math.cos(a2) * r, z.y + Math.sin(a2) * r];
+    const u1 = [t1[0] - t.x, t1[1] - t.y], l1 = Math.hypot(u1[0], u1[1]) || 1;
+    const u2 = [t2[0] - t.x, t2[1] - t.y], l2 = Math.hypot(u2[0], u2[1]) || 1;
+    const f1 = [t1[0] + u1[0] / l1 * L, t1[1] + u1[1] / l1 * L];
+    const f2 = [t2[0] + u2[0] / l2 * L, t2[1] + u2[1] / l2 * L];
+    canvas.beginPath(); canvas.moveTo(t1[0], t1[1]);
+    canvas.lineTo(f1[0], f1[1]); canvas.lineTo(f2[0], f2[1]); canvas.lineTo(t2[0], t2[1]);
+    canvas.closePath(); canvas.fill();
+    canvas.beginPath(); canvas.arc(z.x, z.y, r, 0, 6.2832); canvas.fill();
+  }
+  canvas.globalCompositeOperation = prev;
+}
 function fogPass() {
   fg.globalCompositeOperation = 'source-over'; fg.globalAlpha = 1; fg.clearRect(0, 0, fog.width, fog.height);
   fg.fillStyle = '#000'; fg.fillRect(0, 0, fog.width, fog.height);
   fg.globalCompositeOperation = 'destination-out';
   if (settings.explore) { fg.globalAlpha = 0.5; fg.drawImage(expl, 0, 0); fg.globalAlpha = 1; }
-  const R = settings.sight * map.ppg;
   for (const t of visionTokens()) {
+    const R = sightSquaresFor(t) * map.ppg;
     const poly = visPoly(t.x, t.y, R); if (poly.length < 3) continue;
     polyPath(fg, poly); fg.fillStyle = '#000'; fg.fill();
     polyPath(eg, poly); eg.fillStyle = '#fff'; eg.fill();
+    drawSmokeShadow(fg, t);
   }
   fg.globalCompositeOperation = 'source-over'; fogDirty = false;
 }
@@ -730,7 +828,10 @@ function seenByPlayers(x, y) {
 }
 function tokVisible(t) {
   if (!layers[t.layer].vis) return false;
-  if (t.layer === 'gm' && role === 'player') return seenByPlayers(t.x, t.y) && isLit(t.x, t.y);
+  if (t.layer === 'gm' && role === 'player') {
+    if (inSmoke(t.x, t.y, t.mapKey)) return false;
+    return seenByPlayers(t.x, t.y) && isLit(t.x, t.y);
+  }
   return true;
 }
 const canMoveNow = t => {
@@ -874,6 +975,7 @@ function makeSnapshot() {
     setup: setupPhase,
     turn: { number: turn.number, activeId: turn.activeId, moved: Object.assign({}, turn.moved), attacked: Object.assign({}, turn.attacked) },
     tokens: tokens.map(cleanToken),
+    zones: zones.map(cleanZone).filter(Boolean),
     doors: map ? map.doors.map(d => d.open) : [],
     lights: map ? map.lights.map(l => l.force) : [],
     mapStates: allMapStates(),
@@ -931,6 +1033,7 @@ function applySnapshot(s, initial = false) {
   hostName = s.host || hostName;
   setupPhase = !!s.setup;
   tokens = (s.tokens || []).map(t => Object.assign(cleanToken(t), { plan: undefined }));
+  zones = (Array.isArray(s.zones) ? s.zones : []).map(cleanZone).filter(Boolean);
   nextId = Math.max(0, ...tokens.map(t => t.id)) + 1;
   syncTokenImages();
   if (s.mapStates) restoreMapStates(s.mapStates);
@@ -988,6 +1091,56 @@ function invalidate() { needDraw = true; requestDraw(); }
 function toWorld(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left - view.x) / view.k, y: (e.clientY - r.top - view.y) / view.k }; }
 const toScreen = p => ({ x: p.x * view.k + view.x, y: p.y * view.k + view.y });
 
+function zoneVisible(z) {
+  if (role === 'gm') return true;
+  if (!fogActive()) return true;
+  const ppg = (MAP_BY_ID.get(z.mapKey) || {}).ppg || (map ? map.ppg : 16);
+  return visionTokens().some(t => Math.hypot(t.x - z.x, t.y - z.y) <= (sightSquaresFor(t) + z.radius) * ppg);
+}
+function drawZones(kind) {
+  if (!map) return;
+  const list = zones.filter(z => z.kind === kind && z.mapKey === map.key && zoneVisible(z));
+  for (const z of list) {
+    const r = z.radius * map.ppg;
+    if (kind === 'fire') {
+      const grd = ctx.createRadialGradient(z.x, z.y, r * 0.12, z.x, z.y, r);
+      grd.addColorStop(0, 'rgba(255,226,130,.52)');
+      grd.addColorStop(.5, 'rgba(255,122,38,.32)');
+      grd.addColorStop(1, 'rgba(120,20,0,.04)');
+      ctx.beginPath(); ctx.arc(z.x, z.y, r, 0, 6.2832);
+      ctx.fillStyle = grd; ctx.fill();
+      ctx.lineWidth = Math.max(1.5, 2 / view.k); ctx.strokeStyle = 'rgba(255,145,55,.85)';
+      ctx.setLineDash([5 / view.k, 4 / view.k]); ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      ctx.save(); ctx.globalAlpha = role === 'gm' ? 0.36 : 0.58;
+      const puffs = [[0, 0, .72], [-.42, -.18, .48], [.4, -.12, .5], [-.08, .38, .46], [.18, -.46, .42]];
+      for (const [dx, dy, s] of puffs) {
+        const cx = z.x + dx * r, cy = z.y + dy * r, rr = r * s;
+        const grd = ctx.createRadialGradient(cx, cy, rr * 0.1, cx, cy, rr);
+        grd.addColorStop(0, 'rgba(205,214,224,.78)');
+        grd.addColorStop(.6, 'rgba(150,160,175,.5)');
+        grd.addColorStop(1, 'rgba(110,120,135,0)');
+        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 6.2832); ctx.fillStyle = grd; ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+}
+function drawGrenadeAim() {
+  if (!pendingGrenade || pendingGrenade.x == null || !map) return;
+  const r = pendingGrenade.radius * map.ppg, color = grenadeColor(pendingGrenade.kind);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(pendingGrenade.x, pendingGrenade.y, r, 0, 6.2832);
+  ctx.globalAlpha = 0.16; ctx.fillStyle = color; ctx.fill();
+  ctx.globalAlpha = 1; ctx.lineWidth = Math.max(1.5, 2 / view.k); ctx.strokeStyle = color;
+  ctx.setLineDash([6 / view.k, 4 / view.k]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pendingGrenade.x - 5 / view.k, pendingGrenade.y); ctx.lineTo(pendingGrenade.x + 5 / view.k, pendingGrenade.y);
+  ctx.moveTo(pendingGrenade.x, pendingGrenade.y - 5 / view.k); ctx.lineTo(pendingGrenade.x, pendingGrenade.y + 5 / view.k);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function draw() {
   needDraw = true;
   const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
@@ -1040,9 +1193,12 @@ function draw() {
 
   if (settings.fog && fogDirty) fogPass();
   if (fogActive()) { ctx.globalAlpha = role === 'gm' ? 0.72 : 1; ctx.drawImage(fog, 0, 0); ctx.globalAlpha = 1; }
+  drawZones('fire');
+  drawGrenadeAim();
   for (const s of map.stairs || []) drawStair(s);
   drawRequestHighlight();
   for (const layer of ['gm', 'player']) for (const t of tokens) if (t.layer === layer && onLevel(t) && tokVisible(t)) drawToken(t);
+  drawZones('smoke');
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawRuler();
@@ -1051,7 +1207,7 @@ function draw() {
 function drawToken(t) {
   const r = tokRadius(t), k = view.k, isSel = t.id === selected, img = imgs.get(t.id), TAU = 6.2832;
   const ghost = t.layer === 'gm' && role === 'gm' && fogActive() && !(seenByPlayers(t.x, t.y) && isLit(t.x, t.y));
-  const down = isDown(t), status = (t.status || '').trim();
+  const down = isDown(t), status = statusText(t);
   const showBar = t.maxHp > 0 && (role === 'gm' || settings.showHp || t.layer === 'player' || t.id === me.tokenId);
   const barH = Math.max(5 / k, 3.5);
   const active = settings.turnBased && turn.activeId === t.id;
@@ -1088,7 +1244,7 @@ function drawToken(t) {
     ctx.lineWidth = Math.max(5, 6 / k); ctx.strokeStyle = 'rgba(40,0,0,.85)'; ctx.stroke();
     ctx.lineWidth = Math.max(3, 3.6 / k); ctx.strokeStyle = '#ff2d2d'; ctx.stroke(); ctx.restore();
   }
-  if (t.layer === 'gm' && status && (role === 'gm' || settings.showStatus)) {
+  if (status && (role === 'gm' || settings.showStatus || t.id === me.tokenId)) {
     const fs = Math.max(10 / k, 4), txt = status.slice(0, 24);
     ctx.font = `600 ${fs}px Inter,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const tw = ctx.measureText(txt).width, pad = fs * 0.55, bh = fs * 1.55, by = t.y - r - bh - 2 / k;
@@ -1276,6 +1432,7 @@ cv.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, rectXY(e));
   if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k, wx: ((a.x + b.x) / 2 - view.x) / view.k, wy: ((a.y + b.y) / 2 - view.y) / view.k }; drag = null; return; }
   const w = toWorld(e);
+  if (pendingGrenade) { resolvePendingGrenade(w); return; }
   if (tool === 'ruler') { const p = snapRuler(w); ruler = { a: p, b: p }; drag = { type: 'ruler' }; invalidate(); return; }
   const t = hitToken(w);
   if (t && tokVisible(t)) {
@@ -1328,6 +1485,11 @@ cv.addEventListener('pointermove', e => {
     else if (drag.type === 'ruler') ruler.b = snapRuler(w);
     invalidate(); return;
   }
+  if (pendingGrenade) {
+    const p = snapRuler(w);
+    pendingGrenade.x = p.x; pendingGrenade.y = p.y;
+    cv.style.cursor = 'crosshair'; setHint(null); invalidate(); return;
+  }
   const ht = hitToken(w);
   const hd = (layers.rooms.vis && !layers.rooms.lock) ? hitDoor(w) : null;
   const hb = layers.light.vis ? hitBulb(w) : null;
@@ -1360,7 +1522,7 @@ cv.addEventListener('pointerup', endPointer); cv.addEventListener('pointercancel
 cv.addEventListener('pointerleave', () => { if (hoverTok || hoverDoor) { hoverTok = hoverDoor = null; invalidate(); } setHint(null); });
 cv.addEventListener('wheel', e => { e.preventDefault(); const p = rectXY(e); zoomAt(Math.exp(-e.deltaY * 0.0016), p.x, p.y); }, { passive: false });
 cv.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { ruler = null; selected = null; markSel(); invalidate(); }
+  if (e.key === 'Escape') { if (pendingGrenade) { cancelGrenadeTarget(); return; } ruler = null; selected = null; markSel(); invalidate(); }
   else if (e.key === 'r' || e.key === 'R') setTool('ruler');
   else if (e.key === 'v' || e.key === 'V') setTool('move');
   else if (e.key === 'f' || e.key === 'F') fitView();
@@ -1380,7 +1542,9 @@ $('#file').addEventListener('change', e => { const f = e.target.files[0]; if (f)
 
 /* ---------- hint + tools ---------- */
 function setHint(extra) {
-  const base = role === 'player'
+  const base = pendingGrenade
+    ? `Choose a target for ${pendingGrenade.itemName} · click the map · Esc cancels`
+    : role === 'player'
     ? (tool === 'ruler' ? 'Drag to measure. Esc clears.'
       : setupPhase ? 'The GM is setting up the mission.'
       : !me.tokenId ? 'Waiting for the GM to assign you a character.'
@@ -1754,6 +1918,12 @@ function tokenRow(t) {
     l1.classList.add('pv');
   }
   row.append(l1);
+  const effects = normalizeEffects(t.effects);
+  if (effects.length && (role === 'gm' || t.id === me.tokenId)) {
+    const fx = document.createElement('div'); fx.className = 'muted statline';
+    fx.textContent = effects.map(e => `${EFFECT_LABELS[e.kind]} · ${e.turnsLeft} turn${e.turnsLeft === 1 ? '' : 's'}`).join(' · ');
+    row.append(fx);
+  }
   if (role === 'gm') {
     const l2 = document.createElement('div'); l2.className = 'l2';
     const st = document.createElement('input'); st.type = 'text'; st.placeholder = 'Status (e.g. Wounded)'; st.value = t.status || ''; st.maxLength = 30;
@@ -1781,8 +1951,8 @@ function tokenRow(t) {
     }
     inv.append(head, inventoryEditor(t, true));
     row.append(inv);
-  } else if (t.layer === 'gm' && settings.showStatus && t.status) {
-    const s = document.createElement('div'); s.className = 'muted statline'; s.textContent = t.status; row.append(s);
+  } else if (t.layer === 'gm' && settings.showStatus && statusText(t)) {
+    const s = document.createElement('div'); s.className = 'muted statline'; s.textContent = statusText(t); row.append(s);
   }
   return row;
 }
@@ -2389,6 +2559,34 @@ function setHp(t, value) {
   for (const n of notices) logEvent(n);
   if (prev > 0 && t.hp === 0) logEvent(`${t.name} is down!`);
 }
+function damageToken(t, amount, source, reason) {
+  if (!t || isDown(t)) return 0;
+  const dealt = Math.min(t.hp, Math.max(0, Math.round(+amount || 0)));
+  if (!dealt) return 0;
+  setHp(t, t.hp - dealt);
+  missionToken(t).damageTaken += dealt;
+  if (source && source.id !== t.id) missionToken(source).damageDealt += dealt;
+  recordMissionAction(t, `Took ${dealt} damage from ${reason}.`);
+  return dealt;
+}
+function addEffect(t, kind, turns) {
+  if (!t || !EFFECT_LABELS[kind]) return;
+  t.effects = normalizeEffects(t.effects);
+  const n = Math.max(1, Math.round(turns));
+  const cur = t.effects.find(e => e.kind === kind);
+  if (cur) cur.turnsLeft = Math.max(cur.turnsLeft, n);
+  else t.effects.push({ kind, turnsLeft: n });
+}
+function finishTurnEffects(t) {
+  if (!t) return;
+  const kept = [], expired = [];
+  for (const e of normalizeEffects(t.effects)) {
+    if (e.turnsLeft > 1) kept.push({ kind: e.kind, turnsLeft: e.turnsLeft - 1 });
+    else expired.push(e.kind);
+  }
+  t.effects = kept;
+  for (const kind of expired) logEvent(`${t.name} is no longer ${EFFECT_LABELS[kind].toLowerCase()}.`);
+}
 function inventoryEditor(t, editable) {
   const box = document.createElement('div'); box.className = 'inv';
   if (!t.inventory.length) { const e = document.createElement('span'); e.className = 'muted empty'; e.textContent = 'Empty'; box.append(e); }
@@ -2398,7 +2596,10 @@ function inventoryEditor(t, editable) {
     const q = document.createElement('b'); q.textContent = '×' + it.qty;
     chip.append(nm, q);
     if (editable) {
-      const use = document.createElement('button'); use.type = 'button'; use.className = 'mini'; use.textContent = 'Use'; use.title = 'Use one';
+      const isGrenade = !!grenadeFor(it.name);
+      const use = document.createElement('button'); use.type = 'button'; use.className = 'mini';
+      use.textContent = isGrenade ? 'Throw' : 'Use';
+      use.title = isGrenade ? 'Throw one at a target square' : 'Use one';
       use.onclick = () => useItem(t, idx);
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'mini x'; rm.textContent = '×'; rm.title = 'Remove';
       rm.onclick = () => { t.inventory.splice(idx, 1); commitInventory(t); };
@@ -2408,7 +2609,7 @@ function inventoryEditor(t, editable) {
   });
   if (editable) {
     const add = document.createElement('div'); add.className = 'invadd';
-    const nm = document.createElement('input'); nm.type = 'text'; nm.maxLength = 36; nm.placeholder = 'Add item'; nm.setAttribute('aria-label', 'New inventory item for ' + t.name);
+    const nm = document.createElement('input'); nm.type = 'text'; nm.maxLength = 36; nm.placeholder = 'Add item'; nm.setAttribute('list', 'itemList'); nm.setAttribute('aria-label', 'New inventory item for ' + t.name);
     const qty = document.createElement('input'); qty.type = 'number'; qty.min = 1; qty.max = 999; qty.value = 1; qty.className = 'qtyin'; qty.setAttribute('aria-label', 'Quantity');
     const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny'; b.textContent = '+';
     const addIt = () => {
@@ -2428,8 +2629,96 @@ function commitInventory(t) {
   if (role === 'player') net && net.sendAction({ type: 'inventory', tokenId: t.id, inventory: t.inventory }).catch(() => {});
   else changed();
 }
+function executeGrenade(t, itemName, x, y) {
+  if (!t || !map) return { ok: false, reason: 'No character or deck.' };
+  const g = grenadeFor(itemName);
+  if (!g) return { ok: false, reason: 'That item is not a grenade.' };
+  if ((t.mapKey || map.key) !== map.key) return { ok: false, reason: 'That character is on another deck.' };
+  const idx = t.inventory.findIndex(i => i.name === itemName);
+  if (idx < 0 || t.inventory[idx].qty <= 0) return { ok: false, reason: 'That grenade is no longer in the inventory.' };
+  x = Math.max(0, Math.min(map.W, +x || 0));
+  y = Math.max(0, Math.min(map.H, +y || 0));
+  const it = t.inventory[idx];
+  it.qty--;
+  if (it.qty <= 0) t.inventory.splice(idx, 1);
+  missionToken(t).items.push(itemName);
+  recordMissionAction(t, `Threw ${itemName} at a target area.`);
+  const mapKey = map.key, ppg = map.ppg;
+  const inArea = o => o && o.mapKey === mapKey && Math.hypot(o.x - x, o.y - y) <= g.radius * ppg;
+  if (g.kind === 'frag') {
+    let hits = 0, total = 0;
+    for (const o of tokens) {
+      if (!inArea(o) || isDown(o)) continue;
+      const dealt = damageToken(o, g.damage, t, itemName);
+      if (dealt > 0) { hits++; total += dealt; }
+    }
+    logEvent(`${t.name} throws a ${itemName}: ${g.damage} damage in a ${g.radius}-square radius; ${hits ? hits + ' hit for ' + total + ' total' : 'no one is hit'}.`);
+  } else if (g.kind === 'flashbang') {
+    let hits = 0;
+    for (const o of tokens) {
+      if (!inArea(o)) continue;
+      addEffect(o, 'blinded', g.turns);
+      hits++;
+    }
+    logEvent(`${t.name} throws a flashbang: ${hits} token${hits === 1 ? '' : 's'} blinded within ${g.radius} squares for ${g.turns} of their own turns.`);
+  } else {
+    const z = cleanZone({
+      id: 'z' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      kind: g.kind, mapKey, x, y, radius: g.radius, turnsLeft: g.turns, ownerId: t.id
+    });
+    if (z) zones.push(z);
+    logEvent(`${t.name} throws a ${itemName}: ${g.kind === 'fire' ? 'fire' : 'smoke'} zone with a ${g.radius}-square radius for ${g.turns} player turns.`);
+  }
+  fogDirty = true; lightDirty = true;
+  return { ok: true, kind: g.kind, label: g.label };
+}
+function startGrenadeTarget(t, idx) {
+  if (!t || !map) return;
+  const it = t.inventory[idx]; if (!it) return;
+  const g = grenadeFor(it.name); if (!g) return;
+  if (setupPhase) { showMsg('Begin the mission before using grenades.'); return; }
+  if (isDown(t)) { showMsg('That character is down.'); return; }
+  if (t.mapKey && t.mapKey !== map.key) {
+    showMsg('That character is on another deck. Switch to their deck before throwing.');
+    return;
+  }
+  if (role === 'player') {
+    if (t.id !== me.tokenId) { showMsg('You can only throw your own grenades.'); return; }
+    if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+    if (settings.turnBased && turn.activeId !== t.id) { showMsg('You can only throw grenades on your turn.'); return; }
+  }
+  pendingGrenade = { tokenId: t.id, itemName: it.name, kind: g.kind, radius: g.radius, x: null, y: null };
+  cv.focus({ preventScroll: true });
+  setHint(null); invalidate();
+  showMsg(`Choose a target for ${it.name} · click the map, Esc cancels.`);
+}
+function cancelGrenadeTarget() {
+  if (!pendingGrenade) return;
+  pendingGrenade = null; setHint(null); invalidate();
+  showMsg('Grenade cancelled.');
+}
+function resolvePendingGrenade(w) {
+  const p = pendingGrenade; if (!p) return;
+  const target = snapRuler(w);
+  target.x = Math.max(0, Math.min(map.W, target.x));
+  target.y = Math.max(0, Math.min(map.H, target.y));
+  pendingGrenade = null; setHint(null); invalidate();
+  const t = tokenById(p.tokenId);
+  if (!t) { showMsg('That character is no longer on the table.'); return; }
+  if (role === 'player') {
+    net && net.sendAction({ type: 'throwGrenade', tokenId: t.id, name: p.itemName, x: target.x, y: target.y })
+      .catch(() => showMsg('Could not send the grenade. Check your connection.'));
+    showMsg(`Throwing ${p.itemName}…`);
+    return;
+  }
+  const result = executeGrenade(t, p.itemName, target.x, target.y);
+  if (!result.ok) { showMsg(result.reason || 'Could not throw that grenade.'); return; }
+  changed();
+  showMsg(`${p.itemName} thrown.`);
+}
 function useItem(t, idx) {
   const it = t.inventory[idx]; if (!it) return;
+  if (grenadeFor(it.name)) { startGrenadeTarget(t, idx); return; }
   if (role === 'player') {
     net && net.sendAction({ type: 'useItem', tokenId: t.id, name: it.name }).catch(() => {});
   } else {
@@ -2585,7 +2874,7 @@ function renderSheet() {
   body.append(head);
   const offLevel = t.mapKey && map && t.mapKey !== map.key;
   const status = document.createElement('div'); status.className = 'sub';
-  status.textContent = 'HP ' + t.hp + ' / ' + t.maxHp + (t.status ? ' · ' + t.status : '') + (offLevel ? ' · on ' + mapLabel(MAP_BY_ID.get(t.mapKey)) : '');
+  status.textContent = 'HP ' + t.hp + ' / ' + t.maxHp + (statusText(t) ? ' · ' + statusText(t) : '') + (offLevel ? ' · on ' + mapLabel(MAP_BY_ID.get(t.mapKey)) : '');
   body.append(status);
   if (offLevel) {
     const note = document.createElement('div'); note.className = 'sub';
@@ -2725,14 +3014,39 @@ function renderTurnOrder() {
     row.append(nm, meta, b); box.append(row);
   }
 }
+function startTurnEffects(t) {
+  if (!t || !map) return;
+  const key = t.mapKey || map.key;
+  const ppg = (MAP_BY_ID.get(key) || {}).ppg || map.ppg;
+  const fires = zones.filter(z => z.kind === 'fire' && z.mapKey === key &&
+    Math.hypot(t.x - z.x, t.y - z.y) <= z.radius * ppg);
+  for (const z of fires) {
+    if (isDown(t)) break;
+    damageToken(t, 2, z.ownerId != null ? tokenById(z.ownerId) : null, 'fire');
+  }
+  if (t.layer === 'player') {
+    // Fire and smoke live for a fixed number of player turns. Damage on the
+    // fifth turn still applies, then the zone is removed.
+    for (const z of zones) z.turnsLeft--;
+    zones = zones.filter(z => z.turnsLeft > 0);
+    fogDirty = true; lightDirty = true;
+  }
+}
+function beginTurnFor(t) {
+  if (!t) return;
+  const prev = tokenById(turn.activeId);
+  if (prev) finishTurnEffects(prev);
+  turn.number++; turn.activeId = t.id; turn.moved = {}; turn.attacked = {}; selected = t.id;
+  logEvent(`Turn ${turn.number}: ${t.name}.`);
+  startTurnEffects(t);
+  if (t.mapKey && map && t.mapKey !== map.key) selectMap(t.mapKey, { silent: true });
+  changed();
+}
 function assignTurn(tokenId) {
   if (role !== 'gm') return;
   if (setupPhase) { showMsg('Begin the mission before assigning turns.'); return; }
   const t = tokenById(tokenId); if (!t) return;
-  turn.number++; turn.activeId = tokenId; turn.moved = {}; turn.attacked = {}; selected = tokenId;
-  logEvent(`Turn ${turn.number}: ${t.name}.`);
-  if (t.mapKey && map && t.mapKey !== map.key) selectMap(t.mapKey, { silent: true });
-  changed();
+  beginTurnFor(t);
 }
 function nextTurn(dir) {
   if (role !== 'gm' || !settings.turnBased) return;
@@ -2742,10 +3056,7 @@ function nextTurn(dir) {
   let idx = alive.findIndex(t => t.id === turn.activeId);
   if (idx < 0) idx = dir > 0 ? -1 : 0;
   const next = alive[(idx + dir + alive.length) % alive.length];
-  turn.number++; turn.activeId = next.id; turn.moved = {}; turn.attacked = {}; selected = next.id;
-  logEvent(`Turn ${turn.number}: ${next.name}.`);
-  if (next.mapKey && map && next.mapKey !== map.key) selectMap(next.mapKey, { silent: true });
-  changed();
+  beginTurnFor(next);
 }
 
 function renderLog() {
@@ -2817,7 +3128,7 @@ function missionToken(t) {
   if (!rec) {
     rec = {
       id: t.id, name: t.name, layer: t.layer, mapKey: t.mapKey, weapon: t.weapon,
-      maxHp: t.maxHp, hp: t.hp, status: t.status || '', startHp: t.hp || 0,
+      maxHp: t.maxHp, hp: t.hp, status: statusText(t), startHp: t.hp || 0,
       damageDealt: 0, damageTaken: 0, attacksMade: 0, attacksReceived: 0,
       stances: { strike: 0, grapple: 0, counter: 0, none: 0 },
       distance: 0, stairs: 0, items: [], actions: [], firstSeen: Date.now()
@@ -2825,7 +3136,7 @@ function missionToken(t) {
     mission.tokens.set(t.id, rec);
   }
   rec.name = t.name; rec.layer = t.layer; rec.mapKey = t.mapKey; rec.weapon = t.weapon;
-  rec.maxHp = t.maxHp; rec.hp = t.hp; rec.status = t.status || '';
+  rec.maxHp = t.maxHp; rec.hp = t.hp; rec.status = statusText(t);
   return rec;
 }
 function recordMissionAction(t, text) {
@@ -3281,10 +3592,27 @@ async function handleAction(msg) {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use your own items.'); return; }
       const it = own.inventory.find(x => x.name === String(action.name || ''));
       if (!it) return;
+      if (grenadeFor(it.name)) { net.notify(clientId, 'Choose a target square to throw that grenade.'); return; }
       it.qty--; if (it.qty <= 0) own.inventory = own.inventory.filter(x => x !== it);
       missionToken(own).items.push(it.name);
       recordMissionAction(own, `Used ${it.name}.`);
       logEvent(`${member.name} uses ${it.name}.`); changed(); return;
+    }
+    case 'throwGrenade': {
+      if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only throw your own grenades.'); return; }
+      if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
+      if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
+      if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
+      const itemName = String(action.name || '');
+      const g = grenadeFor(itemName);
+      if (!g) { net.notify(clientId, 'That item is not a grenade.'); return; }
+      if (!own.inventory.some(x => x.name === itemName)) { net.notify(clientId, 'That grenade is no longer in your inventory.'); scheduleSync(); return; }
+      const x = +action.x, y = +action.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) { net.notify(clientId, 'Choose a target square.'); return; }
+      const result = executeGrenade(own, itemName, x, y);
+      if (!result.ok) { net.notify(clientId, result.reason || 'Could not throw that grenade.'); scheduleSync(); return; }
+      net.notify(clientId, `${itemName} thrown.`);
+      changed(); return;
     }
     case 'attack': {
       if (!own || +action.attackerId !== own.id) { net.notify(clientId, 'You can only attack with your own character.'); return; }
@@ -3615,10 +3943,10 @@ const bootMapPromise = loadDefaultMap().catch(err => {
   bootStatus(err.message || 'Could not load the map.', 'err');
 });
 window.__marineCommander = {
-  get map() { return map; }, get tokens() { return tokens; }, get settings() { return settings; },
+  get map() { return map; }, get tokens() { return tokens; }, get zones() { return zones; }, get settings() { return settings; },
   get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; }, get setupPhase() { return setupPhase; },
   get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
-  get mission() { return mission; }, buildMissionReport,
+  get mission() { return mission; }, buildMissionReport, visibleAt: seenByPlayers,
   selectMap, useStair, changed
 };
 

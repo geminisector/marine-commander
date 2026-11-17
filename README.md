@@ -35,10 +35,11 @@ Vercel. `index.html` is the entry point.
 ## How live sync works
 
 - The host's browser is authoritative. It publishes an encrypted snapshot of
-  the whole table (tokens, doors, lights, turns, roster, log) to an MQTT topic.
+  the whole table (tokens, zones, doors, lights, turns, roster, log) to an MQTT
+  topic.
 - Players subscribe to that topic and send small action messages back
-  (`move`, `hp`, `inventory`, `useItem`, `requestDoor`, `chat`, `join`).
-  The host validates ownership and turn order, applies the action, and
+  (`move`, `hp`, `inventory`, `useItem`, `throwGrenade`, `requestDoor`, `chat`,
+  `join`). The host validates ownership and turn order, applies the action, and
   publishes a fresh snapshot.
 - Messages are encrypted end-to-end with AES-GCM. The key is derived from the
   session code, so the public relay only sees ciphertext.
@@ -133,6 +134,28 @@ room's door, or switch **Lighting** to **All lights on**. Setup mode lights ever
 room automatically; normal door/lighting rules resume after **Begin mission**.
 Spawning also warns when no player character is on the current deck or when every
 room is unlit.
+
+### Grenades
+
+Grenades are inventory items. Press **Throw** on a grenade, then click the target
+square; press **Esc** to cancel. The GM can throw with any token, while a player
+can only throw their own grenade on their own turn. Added item names autocomplete
+from the inventory list, and the GM can also add grenades from a token's
+inventory.
+
+- **Flashbang** — 3-square radius. Every token in the area is **Blinded** for 3
+  of its own turns. A blinded character's sight range drops to 1 square.
+- **Smoke grenade** — 3-square radius, lasting 5 player turns. The cloud blocks
+  line of sight through and into it.
+- **Fire grenade** — 3-square radius, lasting 5 player turns. A token standing in
+  the fire takes 2 damage at the start of each of its turns.
+- **Frag grenade** — 4-square radius. Every token in the area immediately takes
+  5 damage, including friendly tokens.
+
+Durations count unit turns, not the table's global turn counter: blindness
+counts down at the end of the affected unit's turns, while fire and smoke last
+for five player-character turns. Fire damage on the fifth player turn still
+applies before the zone expires.
 
 ### Mission reports
 
