@@ -78,6 +78,7 @@ let mission = newMission();
 let missionDamageCtx = null;
 let turn = { number: 1, activeId: null, moved: {}, attacked: {} };
 let anim = null;                    // unused animation slot kept for scene resets
+let fxList = [], fxHistory = [], seenFx = new Set(), fxRaf = 0, hasAppliedSnapshot = false;
 let syncTimer = 0, saveTimer = 0, msgTimer = 0;
 let pendingImg = null;
 let combatCtx = null, combatChosenMove = 'strike';
@@ -482,6 +483,7 @@ function resetToDefaults() {
   cacheCurrentMapState();
   nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; anim = null;
   zones = []; drops = []; pendingGrenade = null;
+  clearFx();
   imgs.clear();
   tokens = map.key === 'cortez' ? defaultTokens() : [];
   syncTokenImages();
@@ -498,6 +500,7 @@ async function loadCustomMap(d) {
   tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} };
   zones = []; pendingGrenade = null;
   drops = [];
+  clearFx();
   roster = []; logRows = []; selected = null; ruler = null;
   clearExplored(); cacheCurrentMapState();
   logEvent('Custom map loaded. It is local to this solo session.');
@@ -988,6 +991,43 @@ function clickStair(st) {
 /* ---------- shared state ---------- */
 const SHARED_SETTINGS = ['mode', 'dark', 'scale', 'snap', 'fog', 'explore', 'sight', 'preview', 'gmPass', 'showStatus', 'showHp', 'turnBased', 'moveLimit'];
 function sharedSettings() { const o = {}; for (const k of SHARED_SETTINGS) o[k] = settings[k]; return o; }
+const FX_DURATION = Object.freeze({ shot: 650, hit: 950, grenade: 1200, drop: 1100, pickup: 900 });
+function showFx(record) {
+  if (!record || !record.kind || !record.mapKey) return;
+  const effect = Object.assign({}, record, {
+    startedAt: performance.now(),
+    duration: FX_DURATION[record.kind] || 650
+  });
+  fxList.push(effect);
+  if (fxList.length > 60) fxList = fxList.slice(-60);
+  if (!fxRaf) fxRaf = requestAnimationFrame(stepFx);
+}
+function stepFx() {
+  fxRaf = 0;
+  const now = performance.now();
+  fxList = fxList.filter(e => now - e.startedAt < e.duration);
+  invalidate();
+  if (fxList.length) fxRaf = requestAnimationFrame(stepFx);
+}
+function emitFx(effect) {
+  const record = Object.assign({ id: 'fx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), t: Date.now() }, effect);
+  fxHistory.push(record);
+  if (fxHistory.length > 40) fxHistory = fxHistory.slice(-40);
+  showFx(record);
+  return record;
+}
+function syncFx(records, initial) {
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!record || !record.id || seenFx.has(record.id)) continue;
+    seenFx.add(record.id);
+    if (!initial && Date.now() - (+record.t || 0) < 4000) showFx(record);
+  }
+  if (seenFx.size > 600) seenFx = new Set([...seenFx].slice(-300));
+}
+function clearFx() {
+  if (fxRaf) cancelAnimationFrame(fxRaf);
+  fxRaf = 0; fxList = []; fxHistory = []; seenFx.clear(); hasAppliedSnapshot = false;
+}
 function makeSnapshot() {
   rev++;
   return {
@@ -1006,6 +1046,7 @@ function makeSnapshot() {
       id: e.id, clientId: e.clientId, attackerId: e.attackerId, targetId: e.targetId,
       move: e.move, reaction: e.reaction, queuedAt: e.queuedAt
     })),
+    fx: fxHistory.slice(-30),
     log: logRows.slice(-70)
   };
 }
@@ -1084,6 +1125,9 @@ function applySnapshot(s, initial = false) {
   if (map) mission.maps.add(map.key);
   syncMyToken();
   syncSettingsUI(); updateDoorCount();
+  const firstApply = initial || !hasAppliedSnapshot;
+  syncFx(s.fx, firstApply);
+  hasAppliedSnapshot = true;
   fogDirty = true; lightDirty = true;
   renderAll();
   if (initial && !fitted) requestAnimationFrame(fitView);
@@ -1183,6 +1227,10 @@ function drawDrops() {
   for (const d of drops) {
     if (d.mapKey !== map.key || !dropVisible(d)) continue;
     const r = Math.max(map.ppg * 0.22, 4 / view.k);
+    const glow = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, r * 3.2);
+    glow.addColorStop(0, 'rgba(242,169,59,.3)');
+    glow.addColorStop(1, 'rgba(242,169,59,0)');
+    ctx.beginPath(); ctx.arc(d.x, d.y, r * 3.2, 0, 6.2832); ctx.fillStyle = glow; ctx.fill();
     ctx.save();
     ctx.translate(d.x, d.y); ctx.rotate(Math.PI / 4);
     ctx.fillStyle = 'rgba(18,25,35,.92)'; ctx.strokeStyle = css('--accent');
@@ -1193,6 +1241,127 @@ function drawDrops() {
     ctx.font = `600 ${Math.max(7, 9 / view.k)}px "IBM Plex Mono",monospace`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('W', d.x, d.y + 0.5 / view.k);
+    ctx.font = `600 ${Math.max(7, 8 / view.k)}px Inter,sans-serif`;
+    ctx.fillStyle = 'rgba(255,225,175,.92)';
+    ctx.fillText(WEAPONS[d.weapon].label, d.x, d.y + r * 2.3);
+  }
+}
+function drawFx(now) {
+  if (!map || !fxList.length) return;
+  const k = view.k, TAU = 6.2832;
+  for (const e of fxList) {
+    if (e.mapKey && e.mapKey !== map.key) continue;
+    const progress = Math.max(0, Math.min(1, (now - e.startedAt) / e.duration));
+    if (e.kind === 'shot' && e.from && e.to) {
+      const travel = Math.min(1, progress / 0.78);
+      const hx = e.from.x + (e.to.x - e.from.x) * travel;
+      const hy = e.from.y + (e.to.y - e.from.y) * travel;
+      ctx.save();
+      ctx.globalAlpha = (1 - Math.max(0, (progress - 0.62) / 0.38)) * 0.28;
+      ctx.strokeStyle = e.color || '#ffe6a0';
+      ctx.lineWidth = Math.max(5, 8 / k);
+      ctx.beginPath(); ctx.moveTo(e.from.x, e.from.y); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.globalAlpha = 1 - Math.max(0, (progress - 0.62) / 0.38);
+      ctx.lineWidth = Math.max(2, 3.4 / k);
+      ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.moveTo(e.from.x, e.from.y); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.shadowBlur = 0;
+      if (progress < 0.35) {
+        ctx.globalAlpha = (1 - progress / 0.35) * 0.95;
+        ctx.beginPath(); ctx.arc(e.from.x, e.from.y, 8 / k, 0, TAU); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(hx, hy, Math.max(3, 4 / k), 0, TAU); ctx.fillStyle = e.color || '#fff2c8'; ctx.fill();
+      ctx.restore();
+    } else if (e.kind === 'hit') {
+      const rise = progress * 30 / k;
+      const ring = map.ppg * (0.12 + progress * 0.9);
+      ctx.save();
+      ctx.globalAlpha = 1 - progress;
+      ctx.strokeStyle = e.color || '#ffb05c'; ctx.lineWidth = Math.max(2, 2.8 / k);
+      ctx.beginPath(); ctx.arc(e.x, e.y, ring, 0, TAU); ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * TAU + progress * 1.2;
+        const r0 = ring * 0.3, r1 = ring * (0.8 + (i % 2) * 0.3);
+        ctx.beginPath();
+        ctx.moveTo(e.x + Math.cos(a) * r0, e.y + Math.sin(a) * r0);
+        ctx.lineTo(e.x + Math.cos(a) * r1, e.y + Math.sin(a) * r1);
+        ctx.stroke();
+      }
+      if (Number.isFinite(+e.amount)) {
+        ctx.globalAlpha = 1 - Math.max(0, (progress - 0.6) / 0.4);
+        ctx.font = `700 ${Math.max(12, 15 / k)}px "Space Grotesk",Inter,sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const text = '-' + fmt(+e.amount);
+        ctx.lineWidth = 3 / k; ctx.strokeStyle = 'rgba(8,12,18,.85)';
+        ctx.strokeText(text, e.x, e.y - map.ppg * 0.95 - rise);
+        ctx.fillStyle = '#ffd9a0';
+        ctx.fillText(text, e.x, e.y - map.ppg * 0.35 - rise);
+      }
+      ctx.restore();
+    } else if (e.kind === 'grenade' && e.from && e.to) {
+      const dx = e.to.x - e.from.x, dy = e.to.y - e.from.y;
+      const dist = Math.hypot(dx, dy);
+      const cx = (e.from.x + e.to.x) / 2, cy = Math.min(e.from.y, e.to.y) - Math.max(map.ppg * 1.8, dist * 0.35);
+      const travel = Math.min(1, progress / 0.58);
+      const bx = (1 - travel) * (1 - travel) * e.from.x + 2 * (1 - travel) * travel * cx + travel * travel * e.to.x;
+      const by = (1 - travel) * (1 - travel) * e.from.y + 2 * (1 - travel) * travel * cy + travel * travel * e.to.y;
+      const color = e.color || grenadeColor(e.grenadeKind);
+      ctx.save();
+      ctx.globalAlpha = 0.6; ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.5, 2.2 / k);
+      ctx.beginPath(); ctx.moveTo(e.from.x, e.from.y); ctx.quadraticCurveTo(cx, cy, e.to.x, e.to.y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.shadowColor = color; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(bx, by, Math.max(3, 4.5 / k), 0, TAU); ctx.fillStyle = color; ctx.fill();
+      ctx.shadowBlur = 0;
+      if (progress > 0.5) {
+        const boom = (progress - 0.5) / 0.5;
+        const rr = e.radius * map.ppg * (0.25 + boom * 1.0);
+        ctx.globalAlpha = (1 - boom) * 0.6;
+        ctx.beginPath(); ctx.arc(e.to.x, e.to.y, rr, 0, TAU); ctx.fillStyle = color; ctx.fill();
+        ctx.globalAlpha = 1 - boom;
+        ctx.strokeStyle = color; ctx.lineWidth = Math.max(2.5, 3.5 / k);
+        ctx.beginPath(); ctx.arc(e.to.x, e.to.y, rr, 0, TAU); ctx.stroke();
+      }
+      ctx.restore();
+    } else if (e.kind === 'drop') {
+      const fall = Math.min(1, progress / 0.45);
+      const y = e.y - (1 - fall) * 36 / k;
+      ctx.save();
+      ctx.globalAlpha = 1 - Math.max(0, (progress - 0.75) / 0.25) * 0.5;
+      const r = Math.max(map.ppg * 0.2, 3.5 / k);
+      ctx.translate(e.x, y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = 'rgba(18,25,35,.94)'; ctx.strokeStyle = css('--accent');
+      ctx.lineWidth = Math.max(1, 1.6 / k);
+      ctx.beginPath(); ctx.rect(-r, -r, r * 2, r * 2); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      if (progress > 0.45) {
+        const p = (progress - 0.45) / 0.55;
+        ctx.save(); ctx.globalAlpha = 1 - p; ctx.strokeStyle = css('--accent');
+        ctx.lineWidth = Math.max(1.2, 1.8 / k);
+        ctx.beginPath(); ctx.arc(e.x, e.y, map.ppg * (0.2 + p * 0.7), 0, TAU); ctx.stroke(); ctx.restore();
+      }
+      ctx.save();
+      ctx.globalAlpha = 1 - progress * 0.35;
+      ctx.font = `600 ${Math.max(7, 8 / k)}px Inter,sans-serif`;
+      ctx.fillStyle = 'rgba(255,225,175,.95)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(e.label || 'Dropped', e.x, e.y - 26 / k - (1 - fall) * 8 / k);
+      ctx.restore();
+    } else if (e.kind === 'pickup') {
+      const p = progress;
+      ctx.save();
+      ctx.globalAlpha = 1 - p;
+      ctx.strokeStyle = '#7ef0b0'; ctx.lineWidth = Math.max(1.2, 1.8 / k);
+      ctx.beginPath(); ctx.arc(e.x, e.y, map.ppg * (0.18 + p * 0.65), 0, TAU); ctx.stroke();
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * TAU + p * 1.4, d = map.ppg * (0.25 + p * 0.7);
+        ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * d, e.y + Math.sin(a) * d, Math.max(1, 1.5 / k), 0, TAU);
+        ctx.fillStyle = '#7ef0b0'; ctx.fill();
+      }
+      ctx.font = `600 ${Math.max(7, 8 / k)}px Inter,sans-serif`;
+      ctx.fillStyle = '#9df5c5'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('+ ' + (e.label || 'Item'), e.x, e.y - 22 / k - p * 14 / k);
+      ctx.restore();
+    }
   }
 }
 
@@ -1255,6 +1424,7 @@ function draw() {
   drawRequestHighlight();
   for (const layer of ['gm', 'player']) for (const t of tokens) if (t.layer === layer && onLevel(t) && tokVisible(t)) drawToken(t);
   drawZones('smoke');
+  drawFx(performance.now());
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawRuler();
@@ -2151,6 +2321,7 @@ function performLoot(looter, source) {
     missionToken(looter).items.push(...items.map(i => i.name));
     recordMissionAction(looter, `Looted ${names} from ${target.name}.`);
     logEvent(`${looter.name} loots ${names} from ${target.name}.`);
+    emitFx({ kind: 'pickup', mapKey: target.mapKey, x: target.x, y: target.y, label: 'Looted' });
     if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[looter.id] = true; }
     return { text: `${looter.name} loots ${names} from ${target.name}.` };
   }
@@ -2167,6 +2338,7 @@ function performLoot(looter, source) {
     const swapped = old ? ` and drops their ${WEAPONS[old].label}` : '';
     recordMissionAction(looter, `Picked up a ${picked}${swapped}.`);
     logEvent(`${looter.name} picks up the dropped ${picked}${swapped}.`);
+    emitFx({ kind: 'pickup', mapKey: drop.mapKey, x: drop.x, y: drop.y, weapon: drop.weapon, label: picked });
     if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[looter.id] = true; }
     return { text: `${looter.name} picks up the ${picked}${swapped}.` };
   }
@@ -2396,6 +2568,7 @@ function dealCombatDamage(target, amount, messages) {
   target.hp = Math.max(0, target.hp - dmg);
   if (missionDamageCtx) missionDamageCtx.push({ targetId: target.id, amount: dmg });
   messages.push(`${target.name} takes ${dmg} damage (${target.hp}/${target.maxHp}).`);
+  emitFx({ kind: 'hit', mapKey: target.mapKey || (map ? map.key : ''), x: target.x, y: target.y, amount: dmg });
   if (weaponKeyOf(target)) {
     const dropped = dropWeapon(target, false);
     messages.push(`${target.name} is disarmed and drops their ${WEAPONS[dropped].label}.`);
@@ -2405,6 +2578,11 @@ function dealCombatDamage(target, amount, messages) {
 function resolveExchange(a, b, aMove, bMove, aiRoll) {
   const aPre = healthPct(a), bPre = healthPct(b);
   const messages = [];
+  const mapKey = a.mapKey || (map ? map.key : '');
+  if (weaponOf(a).type === 'ranged' && mapKey === (b.mapKey || mapKey)) {
+    const shotColor = /laser/.test(a.weapon) ? '#8fe8ff' : a.weapon === 'mass_driver' ? '#ffd27a' : '#ffe6a0';
+    emitFx({ kind: 'shot', mapKey, from: { x: a.x, y: a.y }, to: { x: b.x, y: b.y }, color: shotColor });
+  }
   messages.push(`${a.name} chooses ${MOVE_LABEL[aMove]}; ${b.name} reacts with ${bMove ? MOVE_LABEL[bMove] : 'nothing'}.` + (aiRoll ? ` (d20 ${aiRoll})` : ''));
   if (!bMove) {
     const w = weaponOf(a);
@@ -2731,7 +2909,10 @@ function dropWeapon(t, announce = true) {
     mapKey: t.mapKey || (map ? map.key : DEFAULT_MAP_ID),
     weapon: key, x: t.x, y: t.y, droppedBy: t.id
   });
-  if (d) drops.push(d);
+  if (d) {
+    drops.push(d);
+    emitFx({ kind: 'drop', mapKey: d.mapKey, x: d.x, y: d.y, weapon: key, label: WEAPONS[key].label });
+  }
   if (announce) logEvent(`${t.name} drops their ${WEAPONS[key].label}.`);
   return key;
 }
@@ -2758,6 +2939,7 @@ function damageToken(t, amount, source, reason) {
   missionToken(t).damageTaken += dealt;
   if (source && source.id !== t.id) missionToken(source).damageDealt += dealt;
   recordMissionAction(t, `Took ${dealt} damage from ${reason}.`);
+  emitFx({ kind: 'hit', mapKey: t.mapKey || (map ? map.key : ''), x: t.x, y: t.y, amount: dealt });
   return dealt;
 }
 function addEffect(t, kind, turns) {
@@ -2846,6 +3028,11 @@ function executeGrenade(t, itemName, x, y) {
   missionToken(t).items.push(itemName);
   recordMissionAction(t, `Threw ${itemName} at a target area.`);
   const mapKey = map.key, ppg = map.ppg;
+  emitFx({
+    kind: 'grenade', mapKey,
+    from: { x: t.x, y: t.y }, to: { x, y },
+    grenadeKind: g.kind, radius: g.radius, color: grenadeColor(g.kind)
+  });
   const inArea = o => o && o.mapKey === mapKey && Math.hypot(o.x - x, o.y - y) <= g.radius * ppg;
   if (g.kind === 'frag') {
     let hits = 0, total = 0;
@@ -4169,7 +4356,7 @@ const bootMapPromise = loadDefaultMap().catch(err => {
   bootStatus(err.message || 'Could not load the map.', 'err');
 });
 window.__marineCommander = {
-  get map() { return map; }, get tokens() { return tokens; }, get zones() { return zones; }, get drops() { return drops; }, get settings() { return settings; },
+  get map() { return map; }, get tokens() { return tokens; }, get zones() { return zones; }, get drops() { return drops; }, get fx() { return fxList; }, get settings() { return settings; },
   get turn() { return turn; }, get role() { return role; }, get sessionRole() { return sessionRole; }, get setupPhase() { return setupPhase; },
   get roster() { return roster; }, get log() { return logRows; }, get view() { return view; }, get doors() { return map ? map.doors.map(d => ({ name: d.name, open: d.open })) : []; }, get me() { return me; },
   get mission() { return mission; }, buildMissionReport, visibleAt: seenByPlayers,

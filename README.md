@@ -35,8 +35,8 @@ Vercel. `index.html` is the entry point.
 ## How live sync works
 
 - The host's browser is authoritative. It publishes an encrypted snapshot of
-  the whole table (tokens, zones, drops, doors, lights, turns, roster, log) to
-  an MQTT topic.
+  the whole table (tokens, zones, drops, effects, doors, lights, turns, roster,
+  log) to an MQTT topic.
 - Players subscribe to that topic and send small action messages back
   (`move`, `hp`, `inventory`, `useItem`, `throwGrenade`, `loot`, `requestDoor`,
   `chat`, `join`). The host validates ownership and turn order, applies the
@@ -171,6 +171,14 @@ attacking. Looted inventory stacks merge into the looter's inventory. Picking up
 a dropped weapon equips it and drops the looter's previous weapon at their
 current square. Players can loot with their own living character on their turn;
 the GM can loot with any living token.
+
+### Visual feedback
+
+Combat and looting play short synced effects on the battle map: ranged attacks
+draw a tracer from shooter to target, hits show an impact burst and floating
+damage, grenades arc through the air before exploding, and dropped or picked-up
+weapons flash at their square. The effects are included in live snapshots, so
+every connected player sees them.
 
 ### Mission reports
 
