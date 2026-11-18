@@ -1562,7 +1562,8 @@ function drawStair(s) {
   ctx.fillStyle = 'rgba(18,25,35,.88)'; ctx.fill();
   ctx.lineWidth = Math.max(1.5, (s === hoverStair ? 4 : 2.5) / k);
   ctx.strokeStyle = css('--accent'); ctx.setLineDash([4 / k, 3 / k]); ctx.stroke(); ctx.setLineDash([]);
-  const arrow = s.to.includes('top') ? '↑' : s.to.includes('bottom') ? '↓' : '↕';
+  const arrow = s.dir === 'up' ? '↑' : s.dir === 'down' ? '↓'
+    : s.to.includes('top') ? '↑' : s.to.includes('bottom') ? '↓' : '↕';
   ctx.font = `600 ${Math.max(12 / k, r * 0.95)}px Inter,sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = css('--accent'); ctx.fillText(arrow, s.x, s.y + r * 0.04);

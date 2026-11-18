@@ -1,8 +1,8 @@
 # Marine Commander
 Combat based on the Gemini Sector engine
 
-Marine Commander is a host-run battlemap for the Cortez, Kamekh, Dorkir and
-Dorkathi deck plans. The GM picks the map, opens doors, runs the hostiles,
+Marine Commander is a host-run battlemap for the Cortez, Kamekh, Dorkir,
+Dorkathi, Lumbari and Kilrathi Comm Station deck plans. The GM picks the map, opens doors, runs the hostiles,
 assigns turns, edits HP and inventory, and keeps the table in sync. Each player
 joins with a code, controls one character, moves and attacks on their turn, and
 has their own HP bar, inventory, combat stats and weapon.
@@ -212,13 +212,19 @@ The map picker lists the built-in scenes in `assets/maps/`. Each map is a UVTT
 scene file plus its PNG, so selecting a map is a small JSON fetch and never
 sends the image through the live session.
 
-Kamekh, Dorkir and both Dorkathi decks have room lights baked into their scene
-files. In **Lighting → Follow doors**, opening a door lights that room; **All
-lights on** reveals every room at once.
+Kamekh, Dorkir, Lumbari, the Kilrathi Comm Station and both Dorkathi decks have
+room lights baked into their scene files. In **Lighting → Follow doors**, opening
+a door lights that room; **All lights on** reveals every room at once.
 
 Dorkathi is split into **Lower deck** and **Upper deck**, grouped together in
 the picker. The two decks are connected at the **Central ladder** marker near
-the middle of the ship:
+the middle of the ship. Lumbari is split into **Command deck** and
+**Engineering deck**, connected by a **Forward ladder** and an **Aft ladder**
+(pairing the two ladder symbols on each deck). The Kilrathi Comm Station has
+**Upper**, **Middle** and **Lower** decks, chained together by the **Central
+turbolift** marker on each deck.
+
+For either deck pair:
 
 - The GM selects a token and clicks the ladder marker to send that token to the
   other deck. With no token selected, the same click just switches decks.
