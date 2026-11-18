@@ -80,5 +80,6 @@ window.MC_CONFIG = {
   hostTimeoutMs: 32000,   // players consider the host gone after this
   maxPlayers: 16,
   maxClients: 64,          // player + spectator roster cap; extra joiners spectate
+  medkitHeal: 5,           // HP restored by one Medkit
   snapshotRetain: true
 };

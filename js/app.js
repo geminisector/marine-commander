@@ -82,6 +82,7 @@ let fxList = [], fxHistory = [], seenFx = new Set(), fxRaf = 0, hasAppliedSnapsh
 let syncTimer = 0, saveTimer = 0, msgTimer = 0;
 let pendingImg = null;
 let combatCtx = null, combatChosenMove = 'strike';
+let medkitContext = null;            // { userId, itemName } while the medkit dialog is open
 const pendingDefense = new Map();    // host: requestId -> { clientId, attackerId, targetId, move, timer }
 let incomingDefense = null;          // player: { requestId, move }
 const DEFENSE_TIMEOUT_MS = 30000;
@@ -202,6 +203,11 @@ function grenadeThrowRange(t) {
 function grenadeInRange(t, x, y) {
   if (!t || !map) return false;
   return Math.hypot(t.x - x, t.y - y) / map.ppg <= grenadeThrowRange(t) + 1e-6;
+}
+const MEDKIT_HEAL = Math.max(1, Math.round(+CFG.medkitHeal || 5));
+function isMedkitItem(name) {
+  const key = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return key === 'medkit' || key === 'med kit' || key === 'first aid kit';
 }
 const EFFECT_LABELS = Object.freeze({ blinded: 'Blinded' });
 const HUMAN_TOKENS = 'assets/tokens/human/';
@@ -877,6 +883,40 @@ function segsCross(ax, ay, bx, by, cx, cy, dx, dy) {
   const d1 = o(ax, ay, bx, by, cx, cy), d2 = o(ax, ay, bx, by, dx, dy), d3 = o(cx, cy, dx, dy, ax, ay), d4 = o(cx, cy, dx, dy, bx, by);
   return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
+function orient(ax, ay, bx, by, cx, cy) {
+  const v = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  return Math.abs(v) < 1e-9 ? 0 : v > 0 ? 1 : 2;
+}
+function onSegment(ax, ay, bx, by, px, py) {
+  return px >= Math.min(ax, bx) - 1e-9 && px <= Math.max(ax, bx) + 1e-9 &&
+    py >= Math.min(ay, by) - 1e-9 && py <= Math.max(ay, by) + 1e-9;
+}
+function segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+  const o1 = orient(ax, ay, bx, by, cx, cy), o2 = orient(ax, ay, bx, by, dx, dy);
+  const o3 = orient(cx, cy, dx, dy, ax, ay), o4 = orient(cx, cy, dx, dy, bx, by);
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && onSegment(ax, ay, bx, by, cx, cy)) return true;
+  if (o2 === 0 && onSegment(ax, ay, bx, by, dx, dy)) return true;
+  if (o3 === 0 && onSegment(cx, cy, dx, dy, ax, ay)) return true;
+  if (o4 === 0 && onSegment(cx, cy, dx, dy, bx, by)) return true;
+  return false;
+}
+function segmentHitsCircle(ax, ay, bx, by, cx, cy, r) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  let t = l2 ? ((cx - ax) * dx + (cy - ay) * dy) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(cx - (ax + t * dx), cy - (ay + t * dy)) <= r;
+}
+function grenadeLineOfSight(t, x, y) {
+  if (!t || !map) return false;
+  for (const s of map.hard) {
+    if (segmentsIntersect(t.x, t.y, x, y, s[0], s[1], s[2], s[3])) return false;
+  }
+  for (const z of smokeZones()) {
+    if (segmentHitsCircle(t.x, t.y, x, y, z.x, z.y, z.radius * map.ppg)) return false;
+  }
+  return true;
+}
 function blockedMove(ax, ay, bx, by) {
   if (!map) return true;
   const cl = 2.5;
@@ -991,7 +1031,7 @@ function clickStair(st) {
 /* ---------- shared state ---------- */
 const SHARED_SETTINGS = ['mode', 'dark', 'scale', 'snap', 'fog', 'explore', 'sight', 'preview', 'gmPass', 'showStatus', 'showHp', 'turnBased', 'moveLimit'];
 function sharedSettings() { const o = {}; for (const k of SHARED_SETTINGS) o[k] = settings[k]; return o; }
-const FX_DURATION = Object.freeze({ shot: 650, hit: 950, grenade: 1200, drop: 1100, pickup: 900 });
+const FX_DURATION = Object.freeze({ shot: 650, hit: 950, grenade: 1200, drop: 1100, pickup: 900, heal: 950 });
 function showFx(record) {
   if (!record || !record.kind || !record.mapKey) return;
   const effect = Object.assign({}, record, {
@@ -1196,7 +1236,8 @@ function drawGrenadeAim() {
   if (!pendingGrenade || pendingGrenade.x == null || !map) return;
   const thrower = tokenById(pendingGrenade.tokenId);
   const inRange = !thrower || grenadeInRange(thrower, pendingGrenade.x, pendingGrenade.y);
-  const r = pendingGrenade.radius * map.ppg, color = inRange ? grenadeColor(pendingGrenade.kind) : '#ff5a45';
+  const inSight = !thrower || grenadeLineOfSight(thrower, pendingGrenade.x, pendingGrenade.y);
+  const r = pendingGrenade.radius * map.ppg, color = inRange && inSight ? grenadeColor(pendingGrenade.kind) : '#ff5a45';
   ctx.save();
   if (thrower) {
     const maxR = grenadeThrowRange(thrower) * map.ppg;
@@ -1297,6 +1338,27 @@ function drawFx(now) {
         ctx.strokeText(text, e.x, e.y - map.ppg * 0.95 - rise);
         ctx.fillStyle = '#ffd9a0';
         ctx.fillText(text, e.x, e.y - map.ppg * 0.35 - rise);
+      }
+      ctx.restore();
+    } else if (e.kind === 'heal') {
+      const p = progress, rise = p * 24 / k;
+      ctx.save();
+      ctx.globalAlpha = 1 - p;
+      ctx.strokeStyle = '#7ef0b0'; ctx.lineWidth = Math.max(1.8, 2.6 / k);
+      ctx.beginPath(); ctx.arc(e.x, e.y, map.ppg * (0.18 + p * 0.8), 0, TAU); ctx.stroke();
+      const arm = map.ppg * 0.28;
+      ctx.beginPath();
+      ctx.moveTo(e.x - arm, e.y - rise); ctx.lineTo(e.x + arm, e.y - rise);
+      ctx.moveTo(e.x, e.y - arm - rise); ctx.lineTo(e.x, e.y + arm - rise);
+      ctx.stroke();
+      if (Number.isFinite(+e.amount)) {
+        ctx.font = `700 ${Math.max(12, 15 / k)}px "Space Grotesk",Inter,sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const text = '+' + fmt(+e.amount);
+        ctx.lineWidth = 3 / k; ctx.strokeStyle = 'rgba(8,12,18,.85)';
+        ctx.strokeText(text, e.x, e.y - map.ppg * 0.95 - rise);
+        ctx.fillStyle = '#9df5c5';
+        ctx.fillText(text, e.x, e.y - map.ppg * 0.95 - rise);
       }
       ctx.restore();
     } else if (e.kind === 'grenade' && e.from && e.to) {
@@ -2224,7 +2286,7 @@ function combatRow(t) {
   row.append(b, meta);
   return row;
 }
-function withinLootReach(t, x, y, size = 1) {
+function withinAdjacentReach(t, x, y, size = 1) {
   if (!t || !map || t.mapKey !== map.key) return false;
   const reach = (t.size + (size || 1)) / 2 + 0.5;
   return Math.hypot(t.x - x, t.y - y) / map.ppg <= reach + 1e-6;
@@ -2245,7 +2307,7 @@ function lootSourcesFor(t) {
     if (o.id === t.id || !isDown(o) || o.mapKey !== map.key) continue;
     if (role === 'player' && !tokVisible(o)) continue;
     const items = o.inventory.reduce((n, it) => n + it.qty, 0);
-    if (!items || !withinLootReach(t, o.x, o.y, o.size)) continue;
+    if (!items || !withinAdjacentReach(t, o.x, o.y, o.size)) continue;
     out.push({
       kind: 'token', id: o.id,
       label: `${o.name} · ${items} item${items === 1 ? '' : 's'}`,
@@ -2255,7 +2317,7 @@ function lootSourcesFor(t) {
   for (const d of drops) {
     if (d.mapKey !== map.key || weaponKeyOf(t) === d.weapon) continue;
     if (role === 'player' && !dropVisible(d)) continue;
-    if (!withinLootReach(t, d.x, d.y, 1)) continue;
+    if (!withinAdjacentReach(t, d.x, d.y, 1)) continue;
     out.push({
       kind: 'drop', id: d.id,
       label: `Pick up ${WEAPONS[d.weapon].label}`,
@@ -2311,7 +2373,7 @@ function performLoot(looter, source) {
   if (source.kind === 'token') {
     const target = tokenById(+source.id);
     if (!target || !isDown(target) || target.mapKey !== map.key) return { error: 'That character is no longer lootable.' };
-    if (!withinLootReach(looter, target.x, target.y, target.size)) return { error: 'Move closer to loot that character.' };
+    if (!withinAdjacentReach(looter, target.x, target.y, target.size)) return { error: 'Move closer to loot that character.' };
     const items = normalizeInv(target.inventory);
     if (!items.length) return { error: 'There is nothing left to loot.' };
     if (weaponKeyOf(target)) dropWeapon(target, false);
@@ -2328,7 +2390,7 @@ function performLoot(looter, source) {
   if (source.kind === 'drop') {
     const drop = drops.find(d => d.id === source.id);
     if (!drop || drop.mapKey !== map.key) return { error: 'That dropped weapon is no longer there.' };
-    if (!withinLootReach(looter, drop.x, drop.y, 1)) return { error: 'Move closer to pick that up.' };
+    if (!withinAdjacentReach(looter, drop.x, drop.y, 1)) return { error: 'Move closer to pick that up.' };
     const old = weaponKeyOf(looter);
     if (old === drop.weapon) return { error: `${looter.name} is already carrying a ${WEAPONS[drop.weapon].label}.` };
     if (old) dropWeapon(looter, false);
@@ -2810,6 +2872,12 @@ $('#combatClose').onclick = closeCombat;
 $('#combatCancel').onclick = closeCombat;
 $('#combatDlg').addEventListener('cancel', e => { e.preventDefault(); closeCombat(); });
 $('#combatDlg').addEventListener('click', e => { if (e.target === $('#combatDlg')) closeCombat(); });
+$('#medkitTarget').onchange = updateMedkitDialog;
+$('#medkitGo').onclick = submitMedkit;
+$('#medkitClose').onclick = closeMedkitDialog;
+$('#medkitCancel').onclick = closeMedkitDialog;
+$('#medkitDlg').addEventListener('cancel', e => { e.preventDefault(); closeMedkitDialog(); });
+$('#medkitDlg').addEventListener('click', e => { if (e.target === $('#medkitDlg')) closeMedkitDialog(); });
 
 function showDefenseRequest(data) {
   if (!data || !data.requestId || !MOVE_LABEL[data.move]) return;
@@ -2969,10 +3037,10 @@ function inventoryEditor(t, editable) {
     const q = document.createElement('b'); q.textContent = '×' + it.qty;
     chip.append(nm, q);
     if (editable) {
-      const isGrenade = !!grenadeFor(it.name);
+      const isGrenade = !!grenadeFor(it.name), isMedkit = isMedkitItem(it.name);
       const use = document.createElement('button'); use.type = 'button'; use.className = 'mini';
-      use.textContent = isGrenade ? 'Throw' : 'Use';
-      use.title = isGrenade ? 'Throw one at a target square' : 'Use one';
+      use.textContent = isGrenade ? 'Throw' : isMedkit ? 'Heal' : 'Use';
+      use.title = isGrenade ? 'Throw one at a target square' : isMedkit ? 'Heal yourself or someone adjacent' : 'Use one';
       use.onclick = () => useItem(t, idx);
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'mini x'; rm.textContent = '×'; rm.title = 'Remove';
       rm.onclick = () => { t.inventory.splice(idx, 1); commitInventory(t); };
@@ -3021,6 +3089,9 @@ function executeGrenade(t, itemName, x, y) {
   const range = grenadeThrowRange(t);
   if (!grenadeInRange(t, x, y)) {
     return { ok: false, reason: `Out of range: ${t.name} can throw a grenade up to ${fmt(range)} squares.` };
+  }
+  if (!grenadeLineOfSight(t, x, y)) {
+    return { ok: false, reason: `${t.name} does not have line of sight to that square.` };
   }
   const it = t.inventory[idx];
   it.qty--;
@@ -3099,6 +3170,12 @@ function resolvePendingGrenade(w) {
     showMsg(`Out of range: ${t.name} can throw a grenade up to ${fmt(grenadeThrowRange(t))} squares.`);
     return;
   }
+  if (!grenadeLineOfSight(t, target.x, target.y)) {
+    p.x = target.x; p.y = target.y;
+    setHint(null); invalidate();
+    showMsg(`No line of sight: ${t.name} cannot throw a grenade there.`);
+    return;
+  }
   pendingGrenade = null; setHint(null); invalidate();
   if (role === 'player') {
     net && net.sendAction({ type: 'throwGrenade', tokenId: t.id, name: p.itemName, x: target.x, y: target.y })
@@ -3111,8 +3188,115 @@ function resolvePendingGrenade(w) {
   changed();
   showMsg(`${p.itemName} thrown.`);
 }
+function medkitTargetsFor(t) {
+  if (!t || !map || t.mapKey !== map.key) return [];
+  const out = [];
+  const add = target => {
+    if (!target || target.hp >= target.maxHp) return;
+    if (/^dead$/i.test((target.status || '').trim())) return;
+    out.push(target);
+  };
+  add(t);
+  for (const o of tokens) {
+    if (o.id === t.id || o.mapKey !== map.key) continue;
+    if (!withinAdjacentReach(t, o.x, o.y, o.size)) continue;
+    add(o);
+  }
+  return out;
+}
+function openMedkitDialog(t, idx) {
+  if (!t || !map) return;
+  const it = t.inventory[idx]; if (!it) return;
+  if (isDown(t)) { showMsg('That character is down.'); return; }
+  if (t.mapKey && t.mapKey !== map.key) { showMsg('That character is on another deck.'); return; }
+  if (role === 'player') {
+    if (t.id !== me.tokenId) { showMsg('You can only use your own medkits.'); return; }
+    if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+  }
+  const targets = medkitTargetsFor(t);
+  if (!targets.length) { showMsg('Nobody within reach needs healing.'); return; }
+  medkitContext = { userId: t.id, itemName: it.name };
+  $('#medkitUser').textContent = t.name;
+  $('#medkitUserStats').textContent = `HP ${t.hp}/${t.maxHp} · ${it.name} ×${it.qty}`;
+  const sel = $('#medkitTarget');
+  sel.textContent = '';
+  for (const target of targets) {
+    const o = document.createElement('option');
+    o.value = target.id;
+    o.textContent = `${target.name} · ${target.hp}/${target.maxHp} HP${isDown(target) ? ' · down' : ''}`;
+    sel.append(o);
+  }
+  $('#medkitNote').textContent = `Restores up to ${MEDKIT_HEAL} HP to the medic or an adjacent character.`;
+  $('#medkitResult').hidden = true;
+  updateMedkitDialog();
+  const dlg = $('#medkitDlg');
+  if (!dlg.open) dlg.showModal();
+  sel.focus();
+}
+function updateMedkitDialog() {
+  const ctx = medkitContext; if (!ctx) return;
+  const target = tokenById(+$('#medkitTarget').value);
+  const go = $('#medkitGo');
+  if (!target) { go.disabled = true; $('#medkitTargetStats').textContent = '—'; return; }
+  const heal = Math.max(0, Math.min(MEDKIT_HEAL, target.maxHp - target.hp));
+  $('#medkitTargetStats').textContent = `HP ${target.hp}/${target.maxHp} · +${fmt(heal)} HP${isDown(target) ? ' · down' : ''}`;
+  go.disabled = heal <= 0;
+  go.textContent = isDown(target) ? 'Revive with medkit' : 'Use medkit';
+}
+function closeMedkitDialog() {
+  medkitContext = null;
+  const dlg = $('#medkitDlg');
+  if (dlg.open) dlg.close();
+}
+function submitMedkit() {
+  const ctx = medkitContext; if (!ctx) return;
+  const user = tokenById(ctx.userId);
+  const targetId = +$('#medkitTarget').value;
+  if (!user || !targetId) { showMsg('Choose a target for the medkit.'); return; }
+  if (role === 'player') {
+    if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+    net.sendAction({ type: 'useMedkit', tokenId: user.id, name: ctx.itemName, targetId })
+      .catch(() => showMsg('Could not send the medkit. Check your connection.'));
+    closeMedkitDialog();
+    showMsg('Using medkit…');
+    return;
+  }
+  const result = applyMedkit(user, ctx.itemName, targetId);
+  if (result.error) { showMsg(result.error); return; }
+  closeMedkitDialog();
+  changed();
+  showMsg(result.text);
+}
+function applyMedkit(user, itemName, targetId) {
+  if (!user || !map) return { error: 'No character or deck.' };
+  if (isDown(user)) return { error: `${user.name} is down.` };
+  if (user.mapKey !== map.key) return { error: 'That character is on another deck.' };
+  if (!isMedkitItem(itemName)) return { error: 'That item is not a medkit.' };
+  const idx = user.inventory.findIndex(i => i.name === itemName && isMedkitItem(i.name));
+  if (idx < 0 || user.inventory[idx].qty <= 0) return { error: 'That medkit is no longer in the inventory.' };
+  const target = tokenById(+targetId);
+  if (!target || target.mapKey !== map.key) return { error: 'That character is no longer available.' };
+  if (/^dead$/i.test((target.status || '').trim())) return { error: `${target.name} is dead.` };
+  if (target.id !== user.id && !withinAdjacentReach(user, target.x, target.y, target.size)) {
+    return { error: 'Move next to that character to use a medkit on them.' };
+  }
+  if (target.hp >= target.maxHp) return { error: `${target.name} is already at full health.` };
+  const it = user.inventory[idx];
+  it.qty--;
+  if (it.qty <= 0) user.inventory.splice(idx, 1);
+  missionToken(user).items.push(itemName);
+  const before = target.hp;
+  setHp(target, Math.min(target.maxHp, target.hp + MEDKIT_HEAL));
+  const healed = target.hp - before;
+  recordMissionAction(user, `Used a Medkit on ${target.name}, restoring ${healed} HP.`);
+  if (target.id !== user.id) recordMissionAction(target, `Received a Medkit from ${user.name}, restoring ${healed} HP.`);
+  logEvent(`${user.name} uses a Medkit on ${target.name}.`);
+  emitFx({ kind: 'heal', mapKey: target.mapKey, x: target.x, y: target.y, amount: healed });
+  return { text: `${target.name} recovers ${healed} HP (${target.hp}/${target.maxHp}).` };
+}
 function useItem(t, idx) {
   const it = t.inventory[idx]; if (!it) return;
+  if (isMedkitItem(it.name)) { openMedkitDialog(t, idx); return; }
   if (grenadeFor(it.name)) { startGrenadeTarget(t, idx); return; }
   if (role === 'player') {
     net && net.sendAction({ type: 'useItem', tokenId: t.id, name: it.name }).catch(() => {});
@@ -3989,10 +4173,21 @@ async function handleAction(msg) {
       }
       own.inventory = next; changed(); return;
     }
+    case 'useMedkit': {
+      if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use your own medkits.'); return; }
+      if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
+      const itemName = String(action.name || '');
+      if (!isMedkitItem(itemName)) { net.notify(clientId, 'That item is not a medkit.'); return; }
+      const result = applyMedkit(own, itemName, +action.targetId);
+      if (result.error) { net.notify(clientId, result.error); scheduleSync(); return; }
+      net.notify(clientId, result.text);
+      changed(); return;
+    }
     case 'useItem': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use your own items.'); return; }
       const it = own.inventory.find(x => x.name === String(action.name || ''));
       if (!it) return;
+      if (isMedkitItem(it.name)) { net.notify(clientId, 'Choose a target for the medkit.'); return; }
       if (grenadeFor(it.name)) { net.notify(clientId, 'Choose a target square to throw that grenade.'); return; }
       it.qty--; if (it.qty <= 0) own.inventory = own.inventory.filter(x => x !== it);
       missionToken(own).items.push(it.name);

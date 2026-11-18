@@ -290,6 +290,31 @@
   </div>
 </dialog>
 
+<dialog id="medkitDlg" class="dlg" aria-labelledby="medkitTitle">
+  <div class="dlghead">
+    <div><div class="kicker">MEDKIT</div><h2 id="medkitTitle">Use medkit</h2></div>
+    <button class="btn tiny" id="medkitClose" type="button">Close</button>
+  </div>
+  <div class="combatwho">
+    <div class="combatcard">
+      <span class="mono muted">MEDIC</span>
+      <strong id="medkitUser">—</strong>
+      <span id="medkitUserStats" class="mono muted"></span>
+    </div>
+    <div class="combatcard">
+      <span class="mono muted">TARGET</span>
+      <select id="medkitTarget" aria-label="Medkit target"></select>
+      <span id="medkitTargetStats" class="mono muted"></span>
+    </div>
+  </div>
+  <div id="medkitNote" class="sub"></div>
+  <div id="medkitResult" class="combatresult" hidden></div>
+  <div class="row dlgactions">
+    <button class="btn primary" id="medkitGo" type="button">Use medkit</button>
+    <button class="btn" id="medkitCancel" type="button">Cancel</button>
+  </div>
+</dialog>
+
 <dialog id="defenseDlg" class="dlg" aria-labelledby="defenseTitle">
   <div class="dlghead">
     <div><div class="kicker">INCOMING ATTACK</div><h2 id="defenseTitle">Choose your stance</h2></div>

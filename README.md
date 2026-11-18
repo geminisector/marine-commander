@@ -38,9 +38,9 @@ Vercel. `index.html` is the entry point.
   the whole table (tokens, zones, drops, effects, doors, lights, turns, roster,
   log) to an MQTT topic.
 - Players subscribe to that topic and send small action messages back
-  (`move`, `hp`, `inventory`, `useItem`, `throwGrenade`, `loot`, `requestDoor`,
-  `chat`, `join`). The host validates ownership and turn order, applies the
-  action, and publishes a fresh snapshot.
+  (`move`, `hp`, `inventory`, `useItem`, `useMedkit`, `throwGrenade`, `loot`,
+  `requestDoor`, `chat`, `join`). The host validates ownership and turn order,
+  applies the action, and publishes a fresh snapshot.
 - Messages are encrypted end-to-end with AES-GCM. The key is derived from the
   session code, so the public relay only sees ciphertext.
 - The latest snapshot is **retained** by the broker, so late joiners get the
@@ -140,9 +140,10 @@ room is unlit.
 Grenades are inventory items. Press **Throw** on a grenade, then click the target
 square; press **Esc** to cancel. The GM can throw with any token, while a player
 can only throw their own grenade on their own turn. A throw's maximum range is 2
-squares per point of the thrower's **Athletic** stat. Added item names
-autocomplete from the inventory list, and the GM can also add grenades from a
-token's inventory.
+squares per point of the thrower's **Athletic** stat, and the target must be in
+clear line of sight: walls, closed doors and smoke block the throw. Added item
+names autocomplete from the inventory list, and the GM can also add grenades
+from a token's inventory.
 
 - **Flashbang** — 3-square radius. Every token in the area is **Blinded** for 3
   of its own turns. A blinded character's sight range drops to 1 square.
@@ -157,6 +158,14 @@ Durations count unit turns, not the table's global turn counter: blindness
 counts down at the end of the affected unit's turns, while fire and smoke last
 for five player-character turns. Fire damage on the fifth player turn still
 applies before the zone expires.
+
+### Medkits
+
+Pressing **Heal** on a Medkit opens a target picker. A character can heal
+themselves or any character within adjacent reach. Each Medkit restores 5 HP
+(configurable with `medkitHeal` in [`js/config.js`](js/config.js)) without
+spending the character's attack. Healing a downed character above 0 HP revives
+them; characters marked **Dead** cannot be revived this way.
 
 ### Looting
 
@@ -303,8 +312,9 @@ storage keys.
    and the on-map **AP** indicator show how many movement squares are left this
    turn (∞ when the GM has set no limit). Press **End turn** to advance the table
    to the next character. Click a door or light bulb to ask the GM to open/close
-   the door or switch the light. Use items and edit your own HP from **Your
-   character**; only the GM can add new inventory items. The table log has chat.
+   the door or switch the light. Use items, heal yourself or an adjacent
+   character with a Medkit, and edit your own HP from **Your character**; only
+   the GM can add new inventory items. The table log has chat.
 
 ### Importing CombatBot characters
 
