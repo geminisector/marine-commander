@@ -2637,14 +2637,45 @@ function dealCombatDamage(target, amount, messages) {
   }
   return dmg;
 }
+function shotColorFor(t) {
+  return /laser/.test(t.weapon) ? '#8fe8ff' : t.weapon === 'mass_driver' ? '#ffd27a' : '#ffe6a0';
+}
+// Who lands the exchange: 'a', 'b', 'both' when both draw blood, or null when
+// neither does. The shot animation follows the winner so a counter-attack is
+// shown coming back at the original attacker.
+function exchangeWinner(a, b, aMove, bMove) {
+  if (!bMove) return 'a';
+  if (aMove === 'strike') {
+    if (bMove === 'strike') return 'both';
+    return bMove === 'counter' ? 'b' : 'a';
+  }
+  if (aMove === 'grapple') {
+    if (bMove === 'grapple') return a.hp === b.hp ? null : (b.hp > a.hp ? 'b' : 'a');
+    return bMove === 'counter' ? 'a' : 'b';
+  }
+  if (aMove === 'counter') {
+    if (bMove === 'counter') return null;
+    return bMove === 'strike' ? 'a' : 'b';
+  }
+  return null;
+}
+function emitExchangeShots(a, b, aMove, bMove) {
+  const mapKey = a.mapKey || (map ? map.key : '');
+  if (mapKey !== (b.mapKey || mapKey)) return;
+  const winner = exchangeWinner(a, b, aMove, bMove);
+  const shots = winner === 'a' ? [[a, b]]
+    : winner === 'b' ? [[b, a]]
+    : winner === 'both' ? [[a, b], [b, a]]
+    : [[a, b]];
+  for (const [shooter, target] of shots) {
+    if (weaponOf(shooter).type !== 'ranged') continue;
+    emitFx({ kind: 'shot', mapKey, from: { x: shooter.x, y: shooter.y }, to: { x: target.x, y: target.y }, color: shotColorFor(shooter) });
+  }
+}
 function resolveExchange(a, b, aMove, bMove, aiRoll) {
   const aPre = healthPct(a), bPre = healthPct(b);
   const messages = [];
-  const mapKey = a.mapKey || (map ? map.key : '');
-  if (weaponOf(a).type === 'ranged' && mapKey === (b.mapKey || mapKey)) {
-    const shotColor = /laser/.test(a.weapon) ? '#8fe8ff' : a.weapon === 'mass_driver' ? '#ffd27a' : '#ffe6a0';
-    emitFx({ kind: 'shot', mapKey, from: { x: a.x, y: a.y }, to: { x: b.x, y: b.y }, color: shotColor });
-  }
+  emitExchangeShots(a, b, aMove, bMove);
   messages.push(`${a.name} chooses ${MOVE_LABEL[aMove]}; ${b.name} reacts with ${bMove ? MOVE_LABEL[bMove] : 'nothing'}.` + (aiRoll ? ` (d20 ${aiRoll})` : ''));
   if (!bMove) {
     const w = weaponOf(a);
