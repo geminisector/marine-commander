@@ -84,10 +84,14 @@ security, because the password ships in the static client.
    characters do not spawn automatically; a player who joins while every
    spawned character is already assigned sits at the table as a spectator.
 5. Use **Turns** to give a token the turn, or **Next turn** to cycle through
-   everyone alive. Set a per-turn movement limit if you want one. Players see
-   their remaining **AP** (movement squares left) on their character sheet and
-   in an on-map meter while it is their turn, and can press **End turn** there;
-   the host only accepts that for the player whose turn is actually active.
+   everyone alive. Set **AP per turn** (default 24). The AP pool pays for
+   movement (1 AP per square) and actions; action costs are fixed percentages of
+   the pool, rounded up. At 24 AP: **pick up 7**, **aimed shot 13**, **snap shot
+   9**, **melee 9**, **use 13**. Each player refills to the full pool at the
+   start of their turn. Leftover AP stays available for reflex shots until their
+   next turn. Players see current/max **AP** on their character sheet and in an
+   on-map meter, and can press **End turn** there; the host only accepts that for
+   the player whose turn is actually active.
 6. Click a door to open/close it, click a bulb to cycle its light, drag tokens
    (shift-drag ignores walls), edit HP/status/inventory, add hostiles, and roll
    the table log. **Clear all hostiles** in the Tokens section removes every GM
@@ -139,11 +143,12 @@ room is unlit.
 
 Grenades are inventory items. Press **Throw** on a grenade, then click the target
 square; press **Esc** to cancel. The GM can throw with any token, while a player
-can only throw their own grenade on their own turn. A throw's maximum range is 2
-squares per point of the thrower's **Athletic** stat, and the target must be in
-clear line of sight: walls, closed doors and smoke block the throw. Added item
-names autocomplete from the inventory list, and the GM can also add grenades
-from a token's inventory.
+can only throw their own grenade on their own turn. A throw uses the **Use**
+action (13 AP at the default 24). Its maximum range is 2 squares per point of
+the thrower's **Athletic** stat, and the target must be in clear line of sight:
+walls, closed doors and smoke block the throw. Added item names autocomplete
+from the inventory list, and the GM can also add grenades from a token's
+inventory.
 
 - **Flashbang** — 3-square radius. Every token in the area is **Blinded** for 3
   of its own turns. A blinded character's sight range drops to 1 square.
@@ -161,11 +166,12 @@ applies before the zone expires.
 
 ### Medkits
 
-Pressing **Heal** on a Medkit opens a target picker. A character can heal
-themselves or any character within adjacent reach. Each Medkit restores 5 HP
-(configurable with `medkitHeal` in [`js/config.js`](js/config.js)) without
-spending the character's attack. Healing a downed character above 0 HP revives
-them; characters marked **Dead** cannot be revived this way.
+Pressing **Heal** on a Medkit opens a target picker. On their own turn, a
+character can heal themselves or any character within adjacent reach. Each
+Medkit restores 5 HP (configurable with `medkitHeal` in
+[`js/config.js`](js/config.js)). Using it costs the **Use** action (13 AP at the
+default 24). Healing a downed character above 0 HP revives them; characters
+marked **Dead** cannot be revived this way.
 
 ### Looting
 
@@ -175,11 +181,12 @@ character's remaining inventory stays on their token and can be looted. Living
 characters see **Loot** buttons for nearby dropped weapons and downed/dead
 tokens within melee reach.
 
-Looting costs one attack, using the same once-per-turn attack budget as
-attacking. Looted inventory stacks merge into the looter's inventory. Picking up
-a dropped weapon equips it and drops the looter's previous weapon at their
-current square. Players can loot with their own living character on their turn;
-the GM can loot with any living token.
+Looting costs the **Pick up** action (7 AP at the default 24), not an attack.
+Looted inventory stacks merge into the looter's inventory. Picking up a dropped
+weapon equips it and drops the looter's previous weapon at their current square.
+Players can loot with their own living character on their turn; the GM can loot
+with any living token. Because AP, not a once-per-turn attack budget, limits
+actions, a character with AP left can pick something up and still attack.
 
 ### Visual feedback
 
@@ -314,9 +321,11 @@ storage keys.
 2. Wait for the GM to spawn and assign a character (or ask for one from the
    sheet). If every spawned character is already assigned, you join as a
    spectator until a slot frees up.
-3. On your turn, drag your token to move. The **AP** meter on **Your character**
-   and the on-map **AP** indicator show how many movement squares are left this
-   turn (∞ when the GM has set no limit). Press **End turn** to advance the table
+3. On your turn, drag your token to move (1 AP per square). The **AP** meter on
+   **Your character** and the on-map **AP** indicator show current/max AP and
+   the action costs. Attacks, loot pickups and item uses spend AP; the old
+   one-attack limit is gone. Leftover AP stays available for **reflex shots**
+   when a hostile moves into your sight. Press **End turn** to advance the table
    to the next character. Click a door or light bulb to ask the GM to open/close
    the door or switch the light. Use items, heal yourself or an adjacent
    character with a Medkit, and edit your own HP from **Your character**; only
@@ -362,20 +371,39 @@ Combat is a browser port of the supplied `melee.py` rules.
   rifle, mass driver and rifle are ranged**. Ranged attacks have no range limit. Melee
   attacks need the tokens to be within `(attacker size + target size) / 2 + 0.5`
   squares; otherwise the Attack button explains that the target is out of reach.
-- On a turn a token can move and make **one attack**. The active token gets an
-  **Attack** button. Choose Strike, Grapple or Counter; the matrix is
-  Strike → Grapple → Counter → Strike. Strike vs strike trades damage, grapple
-  vs grapple compares current HP, and so on.
+- **Action economy.** A player turn starts with a full AP pool (24 by default).
+  Movement costs 1 AP per square; actions cost a percentage of the pool,
+  rounded up: **pick up 26%**, **aimed shot 51%**, **snap shot 34%**,
+  **melee 34%**, **use 51%**. At 24 AP that is 7 / 13 / 9 / 9 / 13. The old
+  one-attack-per-turn limit is gone: spend AP until it runs out. Hostiles do not
+  track AP; the GM runs them.
+- The active token gets an **Attack** button. Choose Strike, Grapple or
+  Counter; the matrix is Strike → Grapple → Counter → Strike. Strike vs strike
+  trades damage, grapple vs grapple compares current HP, and so on. Melee
+  attacks cost the melee percentage.
+- **Aimed shot** (ranged) uses the same stance exchange and costs 51%. **Snap
+  shot** (ranged) costs 34% and also uses the stance exchange, but after the
+  exchange says the shot hits, a 50% roll turns that hit into a miss. A miss
+  deals no damage from the snap shot, the defender's reaction still applies, and
+  the shot tracer is drawn to an empty tile. Friendly fire is not possible.
+- **Reflex shots.** When a hostile moves into a player's sight, the move pauses
+  at the point where the hostile becomes visible. Every eligible player (ranged
+  weapon, at least the snap-shot AP, and an online controller) gets a 15-second
+  prompt to spend the snap-shot cost on one reflex snap shot. Unanswered prompts
+  hold fire, then the move resumes. A player can react with any leftover AP,
+  including before their own turn. Hostiles do not receive reflex shots.
 - When a hostile defends, its reaction is chosen by the enemy AI using the
   original d20 behaviour: nat 1 = caught unaware (critical sucker-punch),
   2–9 = the losing move, 10–15 = a random move, 16–20 = the winning move.
   Players never choose a hostile's stance.
-- Player attacks are **queued** instead of resolving immediately. The GM sees
-  the request under **Attack queue**, picks the hostile's stance (or leaves it
-  on AI random), then presses **Resolve attack**. The same picker has **Hostile
-  auto-wins** and **Hostile auto-loses** under **GM override**, so the GM can
-  decide the enemy's fate without rolling the stance matrix. Cancelling the
-  request lets the player act again.
+- Player attacks are **queued** instead of resolving immediately; the request
+  includes whether the shot was aimed or a snap. The host charges the AP when
+  the request is queued. The GM sees the request under **Attack queue**, picks
+  the hostile's stance (or leaves it on AI random), then presses **Resolve
+  attack**. The same picker has **Hostile auto-wins** and **Hostile
+  auto-loses** under **GM override**, so the GM can decide the enemy's fate
+  without rolling the stance matrix. Cancelling the request refunds the AP and
+  lets the player act again.
 - The GM's attack dialog has two extra options below the normal moves:
   **Win** makes the attacker win the exchange and damage the defender; **Lose**
   makes the attacker lose and take the defender's damage. These bypass the

@@ -152,7 +152,8 @@
         <button class="btn tiny" id="clearTurn" type="button">Unassign</button>
       </div>
       <label class="row inl"><input id="turnOn" type="checkbox" checked> Turn-based play</label>
-      <div class="row"><input id="moveLim" type="number" min="0" step="1" value="0" style="width:72px" aria-label="Action points per turn (movement squares)"><span class="inl">AP per turn · squares (0 = unlimited)</span></div>
+      <div class="row"><input id="apPerTurn" type="number" min="1" max="999" step="1" value="24" style="width:72px" aria-label="Action points per player turn"><span class="inl">AP per turn (default 24)</span></div>
+      <div class="sub" id="apCostNote">Move 1/sq · Pick up 7 · Aimed 13 · Snap 9 · Melee 9 · Use 13</div>
       <div id="turnOrder" class="turnorder"></div>
       <div class="sub">Assign the turn from a token row or here. Players can only move their own token on their turn. Shift-drag still places any token instantly.</div>
     </section>
@@ -272,6 +273,14 @@
     </div>
   </div>
   <div id="combatRange" class="sub"></div>
+  <div class="field" id="combatShotWrap">
+    <span>Shot</span>
+    <select id="combatShot" aria-label="Shot mode">
+      <option value="aimed">Aimed</option>
+      <option value="snap">Snap · 50% miss</option>
+    </select>
+    <span id="combatShotInfo" class="sub mono"></span>
+  </div>
   <div class="moveselect" id="combatMoves" role="group" aria-label="Attack move">
     <button type="button" data-move="strike"><b>Strike</b><span>beats grapple</span></button>
     <button type="button" data-move="grapple"><b>Grapple</b><span>beats counter</span></button>
@@ -340,6 +349,30 @@
   </div>
   <div id="defenseNote" class="sub">The GM is waiting for your choice. If you close this, a random stance is used after a short delay.</div>
   <div id="defenseResult" class="combatresult" hidden></div>
+</dialog>
+
+<dialog id="reflexDlg" class="dlg" aria-labelledby="reflexTitle">
+  <div class="dlghead">
+    <div><div class="kicker">REFLEX SHOT</div><h2 id="reflexTitle">Take the shot?</h2></div>
+  </div>
+  <div class="combatwho">
+    <div class="combatcard">
+      <span class="mono muted">MOVING TARGET</span>
+      <strong id="reflexTargetName">—</strong>
+      <span id="reflexTargetStats" class="mono muted"></span>
+    </div>
+    <div class="combatcard">
+      <span class="mono muted">SHOOTER</span>
+      <strong id="reflexShooterName">—</strong>
+      <span id="reflexShooterStats" class="mono muted"></span>
+    </div>
+  </div>
+  <div id="reflexNote" class="sub"></div>
+  <div id="reflexCountdown" class="mono muted"></div>
+  <div class="row dlgactions">
+    <button class="btn primary" id="reflexFire" type="button">Fire snap shot</button>
+    <button class="btn" id="reflexHold" type="button">Hold fire</button>
+  </div>
 </dialog>
 
 <dialog id="requestDlg" class="dlg" aria-labelledby="requestTitle">

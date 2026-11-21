@@ -65,8 +65,48 @@ let view = { x: 0, y: 0, k: 1 }, fitted = false;
 let tool = 'move', selected = null, hoverTok = null, hoverDoor = null, hoverStair = null;
 let ruler = null, ftPer = 5, unit = 'ft';
 const layers = { rooms: { vis: true, lock: false }, light: { vis: true, lock: false }, gm: { vis: true, lock: false }, player: { vis: true, lock: false } };
-const settings = { mode: 'auto', dark: 0.88, scale: 2.4, snap: true, peek: true, fog: true, explore: true, sight: 40, preview: false, gmPass: true, showStatus: false, showHp: true, turnBased: true, moveLimit: 0 };
+const settings = { mode: 'auto', dark: 0.88, scale: 2.4, snap: true, peek: true, fog: true, explore: true, sight: 40, preview: false, gmPass: true, showStatus: false, showHp: true, turnBased: true, apPerTurn: 24 };
 let needDraw = true, lightDirty = true, fogDirty = true;
+
+/* ---------- action economy ----------
+ * AP is a per-player, per-turn pool. The GM sets the size (default 24) and the
+ * action costs are fixed percentages of that pool, rounded up. Movement costs
+ * one AP per square, so the same pool also pays for moving.
+ */
+const AP_PCT = Object.freeze({ pickup: 0.26, aimed: 0.51, snap: 0.34, melee: 0.34, use: 0.51 });
+const AP_LABEL = Object.freeze({ pickup: 'Pick up', aimed: 'Aimed shot', snap: 'Snap shot', melee: 'Melee attack', use: 'Use' });
+const REFLEX_TIMEOUT_MS = 15000;
+function apMax() { return Math.max(1, Math.min(999, Math.round(+settings.apPerTurn || 24))); }
+function apCostFor(kind) {
+  const pct = AP_PCT[kind];
+  return pct ? Math.max(1, Math.ceil(pct * apMax() - 1e-9)) : 0;
+}
+function usesAp(t) { return !!t && t.layer === 'player' && settings.turnBased; }
+function apLeft(t) {
+  if (!t || !usesAp(t)) return Infinity;
+  return Math.max(0, (t.ap != null && Number.isFinite(+t.ap)) ? +t.ap : apMax());
+}
+function canPayAp(t, kind) { return !usesAp(t) || apLeft(t) + 1e-9 >= apCostFor(kind); }
+function spendAp(t, amount) {
+  if (!t || !usesAp(t)) return true;
+  const n = Math.max(0, +amount || 0);
+  const left = apLeft(t);
+  if (left + 1e-9 < n) return false;
+  t.ap = Math.max(0, left - n);
+  return true;
+}
+function payAp(t, kind) { return spendAp(t, apCostFor(kind)); }
+function refundAp(t, amount) {
+  if (!t || !usesAp(t)) return;
+  t.ap = Math.min(apMax(), apLeft(t) + Math.max(0, +amount || 0));
+}
+function apCostSummary() {
+  return `Move 1/sq · Pick up ${apCostFor('pickup')} · Aimed ${apCostFor('aimed')} · Snap ${apCostFor('snap')} · Melee ${apCostFor('melee')} · Use ${apCostFor('use')}`;
+}
+function apStateLabel(t) {
+  if (!usesAp(t)) return '∞';
+  return `${fmt(apLeft(t))}/${fmt(apMax())}`;
+}
 
 let sessionRole = 'solo';           // solo | host | player
 let role = 'gm';                    // gm | player
@@ -76,15 +116,17 @@ let me = { clientId: getClientId(), name: '', tokenId: null };
 let roster = [], logRows = [], rev = 0;
 let mission = newMission();
 let missionDamageCtx = null;
-let turn = { number: 1, activeId: null, moved: {}, attacked: {} };
+let turn = { number: 1, activeId: null, moved: {} };
 let anim = null;                    // unused animation slot kept for scene resets
 let fxList = [], fxHistory = [], seenFx = new Set(), fxRaf = 0, hasAppliedSnapshot = false;
 let syncTimer = 0, saveTimer = 0, msgTimer = 0;
 let pendingImg = null;
-let combatCtx = null, combatChosenMove = 'strike';
+let combatCtx = null, combatChosenMove = 'strike', combatChosenShot = 'aimed';
 let medkitContext = null;            // { userId, itemName } while the medkit dialog is open
 const pendingDefense = new Map();    // host: requestId -> { clientId, attackerId, targetId, move, timer }
 let incomingDefense = null;          // player: { requestId, move }
+let reflexWindow = null;             // host: one open reflex-shot window at a time
+let reflexContext = null;            // player: { requestId, moverId, shooterId, timer }
 const DEFENSE_TIMEOUT_MS = 30000;
 const pendingPlayerAttacks = new Map(); // host: requestId -> { id, clientId, attackerId, targetId, move, reaction, queuedAt }
 let pendingAttacks = [];                // player: snapshot copy of the attack queue
@@ -373,6 +415,7 @@ function cleanToken(t) {
     color: /^#[0-9a-f]{6}$/i.test(t.color || '') ? t.color : '#3cc4b1',
     size, x: +t.x || 0, y: +t.y || 0,
     hp, maxHp,
+    ap: Number.isFinite(+t.ap) ? Math.max(0, Math.min(9999, +t.ap)) : null,
     stats, weapon: WEAPONS[t.weapon] ? t.weapon : '',
     status: String(t.status || '').slice(0, 30), img: typeof t.img === 'string' ? t.img : '',
     inventory: normalizeInv(t.inventory), effects: normalizeEffects(t.effects)
@@ -482,12 +525,13 @@ function build(d, img, key, meta) {
 function resetToDefaults() {
   resetMission();
   clearPendingPlayerAttacks();
+  clearReflexWindow();
   if (!map) return;
   mapStates.clear();
   map.doors.forEach((d, i) => { d.open = map.key === 'cortez' ? DEFAULT_OPEN.includes(i) : false; });
   map.lights.forEach(l => { l.force = null; });
   cacheCurrentMapState();
-  nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} }; anim = null;
+  nextId = 1; turn = { number: 1, activeId: null, moved: {} }; anim = null;
   zones = []; drops = []; pendingGrenade = null;
   clearFx();
   imgs.clear();
@@ -502,8 +546,9 @@ async function loadCustomMap(d) {
   cacheCurrentMapState();
   await loadMap(d, 'custom', location.href, { name: 'Custom map' });
   resetMission();
+  clearReflexWindow();
   mapStates.clear();
-  tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {}, attacked: {} };
+  tokens = []; nextId = 1; turn = { number: 1, activeId: null, moved: {} };
   zones = []; pendingGrenade = null;
   drops = [];
   clearFx();
@@ -751,7 +796,7 @@ function defaultTokens() {
     const bag = inv || (layer === 'gm'
       ? [{ name: 'Frag grenade', qty: 1 }]
       : [{ name: 'Medkit', qty: 1 }, { name: 'Ammo', qty: 2 }]);
-    const t = { id: nextId++, layer, mapKey: map ? map.key : DEFAULT_MAP_ID, name, color, size, x, y, status: '', hp: maxHp, maxHp, stats: st, weapon, inventory: bag, img };
+    const t = { id: nextId++, layer, mapKey: map ? map.key : DEFAULT_MAP_ID, name, color, size, x, y, status: '', hp: maxHp, maxHp, ap: layer === 'player' ? apMax() : 0, stats: st, weapon, inventory: bag, img };
     snapTok(t); return t;
   };
   // Pixel centre of a map square (the scene is 64 x 39.25 squares at 16 px each).
@@ -1029,7 +1074,7 @@ function clickStair(st) {
 }
 
 /* ---------- shared state ---------- */
-const SHARED_SETTINGS = ['mode', 'dark', 'scale', 'snap', 'fog', 'explore', 'sight', 'preview', 'gmPass', 'showStatus', 'showHp', 'turnBased', 'moveLimit'];
+const SHARED_SETTINGS = ['mode', 'dark', 'scale', 'snap', 'fog', 'explore', 'sight', 'preview', 'gmPass', 'showStatus', 'showHp', 'turnBased', 'apPerTurn'];
 function sharedSettings() { const o = {}; for (const k of SHARED_SETTINGS) o[k] = settings[k]; return o; }
 const FX_DURATION = Object.freeze({ shot: 650, hit: 950, grenade: 1200, drop: 1100, pickup: 900, heal: 950 });
 function showFx(record) {
@@ -1073,7 +1118,7 @@ function makeSnapshot() {
   return {
     v: 2, rev, ts: Date.now(), host: hostName || me.name || 'GM', mapKey: map ? map.key : DEFAULT_MAP_ID,
     setup: setupPhase,
-    turn: { number: turn.number, activeId: turn.activeId, moved: Object.assign({}, turn.moved), attacked: Object.assign({}, turn.attacked) },
+    turn: { number: turn.number, activeId: turn.activeId, moved: Object.assign({}, turn.moved) },
     tokens: tokens.map(cleanToken),
     zones: zones.map(cleanZone).filter(Boolean),
     drops: drops.map(cleanDrop).filter(Boolean),
@@ -1084,7 +1129,7 @@ function makeSnapshot() {
     roster: roster.map(r => ({ clientId: r.clientId, name: r.name, tokenId: r.tokenId, online: r.online, joinedAt: r.joinedAt })),
     pendingAttacks: [...pendingPlayerAttacks.values()].map(e => ({
       id: e.id, clientId: e.clientId, attackerId: e.attackerId, targetId: e.targetId,
-      move: e.move, reaction: e.reaction, queuedAt: e.queuedAt
+      move: e.move, shot: e.shot, cost: e.cost, reaction: e.reaction, queuedAt: e.queuedAt
     })),
     fx: fxHistory.slice(-30),
     log: logRows.slice(-70)
@@ -1147,9 +1192,21 @@ function applySnapshot(s, initial = false) {
     rebuildBlockers();
   }
   Object.assign(settings, s.settings || {});
+  // Older saves used a free-form movement-square limit. Reuse it as the AP
+  // pool size so an in-progress table keeps a sensible action budget.
+  if (!s.settings || !Number.isFinite(+s.settings.apPerTurn) || +s.settings.apPerTurn <= 0) {
+    const legacy = s.settings && +s.settings.moveLimit;
+    settings.apPerTurn = Number.isFinite(legacy) && legacy > 0 ? legacy : 24;
+  }
+  delete settings.moveLimit;
+  for (const t of tokens) {
+    if (t.layer !== 'player') { t.ap = 0; continue; }
+    if (t.ap == null || !Number.isFinite(+t.ap)) t.ap = apMax();
+    t.ap = Math.max(0, Math.min(apMax(), +t.ap));
+  }
   if (s.ftPer > 0) ftPer = s.ftPer;
   if (s.unit) unit = s.unit;
-  turn = s.turn && typeof s.turn.number === 'number' ? { number: s.turn.number, activeId: s.turn.activeId ?? null, moved: s.turn.moved || {}, attacked: s.turn.attacked || {} } : { number: 1, activeId: null, moved: {}, attacked: {} };
+  turn = s.turn && typeof s.turn.number === 'number' ? { number: s.turn.number, activeId: s.turn.activeId ?? null, moved: s.turn.moved || {} } : { number: 1, activeId: null, moved: {} };
   roster = Array.isArray(s.roster) ? s.roster : [];
   pendingAttacks = Array.isArray(s.pendingAttacks) ? s.pendingAttacks : [];
   if (initial && sessionRole === 'host') {
@@ -1185,7 +1242,9 @@ function syncSettingsUI() {
   $('#peek').checked = settings.peek; $('#snap').checked = settings.snap;
   $('#fogOn').checked = settings.fog; $('#explOn').checked = settings.explore;
   $('#sight').value = settings.sight; $('#sightOut').textContent = settings.sight + ' sq';
-  $('#showHp').checked = settings.showHp; $('#turnOn').checked = settings.turnBased; $('#moveLim').value = settings.moveLimit;
+  $('#showHp').checked = settings.showHp; $('#turnOn').checked = settings.turnBased; $('#apPerTurn').value = settings.apPerTurn;
+  const apNote = $('#apCostNote');
+  if (apNote) apNote.textContent = apCostSummary();
   $('#preview').checked = settings.preview; $('#gmPass').checked = settings.gmPass; $('#showStatus').checked = settings.showStatus;
   $('#ftper').value = ftPer; $('#unit').value = unit;
   $$('.lrow[data-layer]').forEach(row => { const L = layers[row.dataset.layer]; $('.vis', row).checked = L.vis; const lk = $('.lock', row); if (lk) lk.checked = L.lock; });
@@ -1798,10 +1857,8 @@ function endPointer(e) {
       if (role === 'player') {
         net && net.sendAction({ type: 'move', tokenId: t.id, x: t.x, y: t.y }).catch(() => showMsg('Could not send the move. Check your connection.'));
       } else {
-        const d = Math.hypot(t.x - drag.sx, t.y - drag.sy) / map.ppg;
-        addMissionDistance(t, d);
-        if (settings.turnBased && turn.activeId === t.id) turn.moved[t.id] = (turn.moved[t.id] || 0) + d;
-        fogDirty = true; changed();
+        const tx = t.x, ty = t.y;
+        hostMoveToken(t, drag.sx, drag.sy, tx, ty, {});
       }
     }
   }
@@ -1896,9 +1953,19 @@ $('#clearExpl').onclick = () => { clearExplored(); invalidate(); };
 $('#endTurn').onclick = () => nextTurn(1);
 $('#nextTurn2').onclick = () => nextTurn(1);
 $('#prevTurn').onclick = () => nextTurn(-1);
-$('#clearTurn').onclick = () => { turn.activeId = null; turn.moved = {}; turn.attacked = {}; logEvent('GM unassigns the turn.'); changed(); };
-$('#turnOn').onchange = e => { settings.turnBased = e.target.checked; if (!settings.turnBased) { turn.activeId = null; turn.moved = {}; turn.attacked = {}; } logEvent(settings.turnBased ? 'Turn-based play enabled.' : 'Free movement enabled.'); changed(); };
-$('#moveLim').oninput = e => { const v = parseFloat(e.target.value); settings.moveLimit = v > 0 ? v : 0; commitSetting(); };
+$('#clearTurn').onclick = () => { turn.activeId = null; turn.moved = {}; logEvent('GM unassigns the turn.'); changed(); };
+$('#turnOn').onchange = e => { settings.turnBased = e.target.checked; if (!settings.turnBased) { turn.activeId = null; turn.moved = {}; } logEvent(settings.turnBased ? 'Turn-based play enabled.' : 'Free movement enabled.'); changed(); };
+$('#apPerTurn').oninput = e => {
+  const v = Math.max(1, Math.min(999, Math.round(+e.target.value || 24)));
+  settings.apPerTurn = v;
+  for (const t of tokens) if (t.layer === 'player') t.ap = Math.min(apMax(), Math.max(0, (t.ap != null && Number.isFinite(+t.ap)) ? +t.ap : apMax()));
+  const active = tokenById(turn.activeId);
+  if (active && active.layer === 'player') active.ap = apMax();
+  const note = $('#apCostNote');
+  if (note) note.textContent = apCostSummary();
+  commitSetting();
+  changed();
+};
 function commitSetting() { if (sessionRole === 'host') scheduleSync(); if (sessionRole === 'solo') scheduleSave(); }
 function scheduleLightSync() { if (sessionRole === 'host') scheduleSync(); else if (sessionRole === 'solo') scheduleSave(); }
 
@@ -1994,7 +2061,7 @@ function spawnPlayerCharacter(key) {
   const t = {
     id: nextId++, layer: 'player', mapKey: map.key, name: preset.name,
     color: preset.color, size: 1, x: slot.x, y: slot.y, status: '',
-    hp: maxHp, maxHp, stats, weapon: preset.weapon,
+    hp: maxHp, maxHp, ap: apMax(), stats, weapon: preset.weapon,
     inventory: cloneInventory(preset.inventory), img: preset.img
   };
   tokens.push(t);
@@ -2098,7 +2165,7 @@ function spawnEnemies(role, count) {
     const t = {
       id: nextId++, layer: 'gm', mapKey: map.key, name,
       color: preset.color, size: 1, x: slots[i].x, y: slots[i].y,
-      status: '', hp: maxHp, maxHp, stats, weapon: preset.weapon,
+      status: '', hp: maxHp, maxHp, ap: 0, stats, weapon: preset.weapon,
       inventory: cloneInventory(preset.inv), img: (preset.dir || HUMAN_TOKENS) + preset.img
     };
     tokens.push(t);
@@ -2252,19 +2319,19 @@ function combatTargets(t) {
   return tokens.filter(o => o.id !== t.id && !isDown(o) && onLevel(o) &&
     (role === 'gm' || (o.layer === 'gm' && tokVisible(o))));
 }
-function pendingAttackFor(tokenId) {
+function pendingAttacksFor(tokenId) {
   const list = sessionRole === 'player' ? pendingAttacks : [...pendingPlayerAttacks.values()];
-  return list.find(e => +e.attackerId === +tokenId) || null;
+  return list.filter(e => +e.attackerId === +tokenId);
 }
 function attackBlockedReason(t) {
   if (!t || !map) return 'No map loaded';
   if (setupPhase) return 'Setup phase — begin the mission first';
   if (isDown(t)) return t.name + ' is down';
   if (role === 'player' && t.id !== me.tokenId) return 'Not your character';
-  if (pendingAttackFor(t.id)) return t.name + "'s attack is waiting for the GM";
   if (settings.turnBased) {
     if (turn.activeId !== t.id) return 'Not ' + t.name + "'s turn";
-    if (turn.attacked && turn.attacked[t.id]) return t.name + ' has already attacked this turn';
+    const kind = weaponOf(t).type === 'ranged' ? 'snap' : 'melee';
+    if (!canPayAp(t, kind)) return `${t.name} needs ${apCostFor(kind)} AP to attack`;
   }
   const targets = combatTargets(t);
   if (!targets.length) return role === 'player' ? 'No hostile in sight' : 'No valid target';
@@ -2274,16 +2341,19 @@ function attackBlockedReason(t) {
 }
 function combatRow(t) {
   const row = document.createElement('div'); row.className = 'l2 combatrow';
-  const queued = pendingAttackFor(t.id);
+  const queued = pendingAttacksFor(t.id).length;
   const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny primary';
-  b.textContent = queued ? 'Attack queued' : settings.turnBased && turn.attacked && turn.attacked[t.id] ? 'Attack used' : 'Attack';
+  b.textContent = 'Attack';
   const reason = attackBlockedReason(t);
   b.disabled = !!reason;
-  b.title = reason || 'Choose a target and a move';
+  b.title = reason || 'Choose a target, a stance and an aimed or snap shot';
   b.onclick = () => openCombat(t.id);
   const w = weaponOf(t);
   const meta = document.createElement('span'); meta.className = 'mono muted combatmeta';
-  meta.textContent = `${w.label} · ${w.type}` + (queued ? ' · awaiting GM' : settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · used' : '');
+  const costText = !usesAp(t) ? ''
+    : w.type === 'ranged' ? ` · Aimed ${apCostFor('aimed')} / Snap ${apCostFor('snap')} AP`
+    : ` · Melee ${apCostFor('melee')} AP`;
+  meta.textContent = `${w.label} · ${w.type}${costText}` + (queued ? ` · ${queued} queued` : '');
   row.append(b, meta);
   return row;
 }
@@ -2335,14 +2405,15 @@ function lootRow(t) {
   const label = document.createElement('span'); label.className = 'mono muted'; label.textContent = 'Loot';
   row.append(label);
   const myTurn = !settings.turnBased || role === 'gm' || turn.activeId === t.id;
-  const spent = settings.turnBased && turn.attacked && turn.attacked[t.id];
+  const pickupCost = apCostFor('pickup');
+  const canPickup = canPayAp(t, 'pickup');
   for (const source of sources) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny';
     b.textContent = source.label;
-    b.disabled = spent || !myTurn || (role === 'player' && (!hostOnline || netState !== 'live'));
-    b.title = spent ? `${t.name} has already used their attack this turn.`
+    b.disabled = !canPickup || !myTurn || (role === 'player' && (!hostOnline || netState !== 'live'));
+    b.title = !canPickup ? `${t.name} needs ${pickupCost} AP to pick that up.`
       : !myTurn ? `Wait for ${t.name}'s turn.`
-      : source.title + ' · costs 1 attack';
+      : source.title + ` · costs ${pickupCost} AP`;
     b.onclick = () => requestLoot(t, source);
     row.append(b);
   }
@@ -2367,9 +2438,7 @@ function performLoot(looter, source) {
   if (setupPhase) return { error: 'Begin the mission before looting.' };
   if (isDown(looter)) return { error: `${looter.name} is down.` };
   if (looter.mapKey !== map.key) return { error: 'That character is on another deck.' };
-  if (settings.turnBased && turn.attacked && turn.attacked[looter.id]) {
-    return { error: `${looter.name} has already used their attack this turn.` };
-  }
+  if (!canPayAp(looter, 'pickup')) return { error: `${looter.name} needs ${apCostFor('pickup')} AP to pick something up.` };
   if (!source) return { error: 'That loot is no longer there.' };
   if (source.kind === 'token') {
     const target = tokenById(+source.id);
@@ -2385,7 +2454,7 @@ function performLoot(looter, source) {
     recordMissionAction(looter, `Looted ${names} from ${target.name}.`);
     logEvent(`${looter.name} loots ${names} from ${target.name}.`);
     emitFx({ kind: 'pickup', mapKey: target.mapKey, x: target.x, y: target.y, label: 'Looted' });
-    if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[looter.id] = true; }
+    payAp(looter, 'pickup');
     return { text: `${looter.name} loots ${names} from ${target.name}.` };
   }
   if (source.kind === 'drop') {
@@ -2402,7 +2471,7 @@ function performLoot(looter, source) {
     recordMissionAction(looter, `Picked up a ${picked}${swapped}.`);
     logEvent(`${looter.name} picks up the dropped ${picked}${swapped}.`);
     emitFx({ kind: 'pickup', mapKey: drop.mapKey, x: drop.x, y: drop.y, weapon: drop.weapon, label: picked });
-    if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[looter.id] = true; }
+    payAp(looter, 'pickup');
     return { text: `${looter.name} picks up the ${picked}${swapped}.` };
   }
   return { error: 'That loot is no longer there.' };
@@ -2413,6 +2482,7 @@ function resolveQueuedPlayerAttack(id) {
   pendingPlayerAttacks.delete(id);
   const a = tokenById(entry.attackerId), b = tokenById(entry.targetId);
   if (!a || !b) {
+    if (a) refundAp(a, entry.cost || 0);
     net && net.notify(entry.clientId, 'That attack could not be resolved: a combatant is gone.');
     changed(); return;
   }
@@ -2422,8 +2492,9 @@ function resolveQueuedPlayerAttack(id) {
     : entry.reaction === 'enemy-lose' ? 'win' : null;
   const result = forced
     ? performForcedExchange(a.id, b.id, forced, { fromQueue: true })
-    : performAttack(a.id, b.id, entry.move, entry.reaction, false, { fromQueue: true });
+    : performAttack(a.id, b.id, entry.move, entry.reaction, false, { fromQueue: true, snap: entry.shot === 'snap' });
   if (result.error) {
+    refundAp(a, entry.cost || 0);
     net && net.notify(entry.clientId, 'Attack failed: ' + result.error);
     showMsg(result.error);
   } else {
@@ -2435,12 +2506,10 @@ function cancelQueuedPlayerAttack(id) {
   const entry = pendingPlayerAttacks.get(id);
   if (!entry) return;
   pendingPlayerAttacks.delete(id);
-  if (settings.turnBased && turn.attacked && turn.attacked[entry.attackerId] && !pendingAttackFor(entry.attackerId)) {
-    delete turn.attacked[entry.attackerId];
-  }
   const a = tokenById(entry.attackerId);
+  refundAp(a, entry.cost || 0);
   logEvent(`GM cancels ${a ? a.name : 'the player'}'s attack request.`);
-  net && net.notify(entry.clientId, 'The GM cancelled your attack. You can act again.');
+  net && net.notify(entry.clientId, `The GM cancelled your attack.${entry.cost ? ` ${entry.cost} AP refunded.` : ''}`);
   changed();
 }
 function clearPendingPlayerAttacks() {
@@ -2461,7 +2530,7 @@ function renderPendingAttacks() {
     const outranged = !!(a && b && rangedAutoLoss(a, b));
     const row = document.createElement('div'); row.className = 'pendingattack';
     const who = document.createElement('div'); who.className = 'who';
-    who.textContent = `${a ? a.name : 'Unknown'} → ${b ? b.name : 'Unknown'} · ${MOVE_LABEL[entry.move] || 'Attack'}` +
+    who.textContent = `${a ? a.name : 'Unknown'} → ${b ? b.name : 'Unknown'} · ${entry.shot === 'snap' ? 'Snap · ' : entry.shot === 'aimed' ? 'Aimed · ' : 'Melee · '}${MOVE_LABEL[entry.move] || 'Attack'}` +
       (b ? ` · ${b.hp}/${b.maxHp} HP` : '') + (outranged ? ' · defender outranged, automatic win' : '');
     const controls = document.createElement('div'); controls.className = 'controls';
     const sel = document.createElement('select');
@@ -2545,6 +2614,11 @@ function openCombat(attackerId) {
   if (!targets.length) { showMsg('No valid targets.'); return; }
   combatCtx = { attackerId };
   combatChosenMove = 'strike';
+  combatChosenShot = 'aimed';
+  const shotSel = $('#combatShot');
+  if (shotSel) shotSel.value = combatChosenShot;
+  const shotWrap = $('#combatShotWrap');
+  if (shotWrap) shotWrap.hidden = weaponOf(a).type !== 'ranged' || a.layer !== 'player';
   const sel = $('#combatTarget');
   sel.textContent = '';
   targets.sort((p, q) => {
@@ -2601,8 +2675,31 @@ function updateCombatDialog() {
       ? `${owner.name} will be asked to choose their stance.`
       : 'No player is online for this character · random stance.';
   }
-  $('#combatGo').disabled = !reach.ok || isDown(b);
-  $('#combatGo').textContent = role === 'player' ? 'Send attack' : forced ? 'Resolve exchange' : 'Attack';
+  const ranged = weaponOf(a).type === 'ranged';
+  const canChooseShot = ranged && a.layer === 'player';
+  const shotWrap = $('#combatShotWrap');
+  if (shotWrap) shotWrap.hidden = !canChooseShot;
+  if (canChooseShot) {
+    const shotSel = $('#combatShot');
+    if (shotSel) {
+      shotSel.value = combatChosenShot;
+      const aimedOpt = shotSel.querySelector('option[value="aimed"]');
+      const snapOpt = shotSel.querySelector('option[value="snap"]');
+      if (aimedOpt) aimedOpt.textContent = `Aimed · ${apCostFor('aimed')} AP`;
+      if (snapOpt) snapOpt.textContent = `Snap · ${apCostFor('snap')} AP · 50% miss`;
+    }
+    const info = $('#combatShotInfo');
+    if (info) info.textContent = combatChosenShot === 'snap'
+      ? `Normal exchange; half of all hits go wide · ${apCostFor('snap')} AP`
+      : `Normal exchange · ${apCostFor('aimed')} AP`;
+  }
+  const cost = canChooseShot ? apCostFor(combatChosenShot) : apCostFor(ranged ? 'aimed' : 'melee');
+  const apOk = !usesAp(a) || apLeft(a) + 1e-9 >= cost;
+  if (!apOk && canChooseShot) {
+    $('#combatRange').textContent += ` · needs ${cost} AP (${fmt(apLeft(a))} left)`;
+  }
+  $('#combatGo').disabled = !reach.ok || isDown(b) || !apOk;
+  $('#combatGo').textContent = (role === 'player' ? 'Send attack' : forced ? 'Resolve exchange' : 'Attack') + (usesAp(a) ? ` · ${cost} AP` : '');
 }
 function controllerOf(tokenId) {
   return roster.find(r => r.tokenId === tokenId) || null;
@@ -2660,10 +2757,38 @@ function exchangeWinner(a, b, aMove, bMove) {
   }
   return null;
 }
-function emitExchangeShots(a, b, aMove, bMove) {
+function emptyTileNear(x, y, mapKey) {
+  if (!map) return { x, y };
+  const g = map.ppg;
+  const occupied = (tx, ty) => tokens.some(t => (t.mapKey || map.key) === mapKey && Math.hypot(t.x - tx, t.y - ty) < g * 0.6);
+  const candidates = [];
+  for (let r = 1; r <= 4; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const tx = x + dx * g, ty = y + dy * g;
+        if (tx < 0 || ty < 0 || tx > map.W || ty > map.H) continue;
+        if (occupied(tx, ty) || !isFloorPoint(tx, ty)) continue;
+        candidates.push({ x: tx, y: ty });
+      }
+    }
+  }
+  return candidates.length ? choice(candidates) : { x: x + g * 0.5, y };
+}
+function emitExchangeShots(a, b, aMove, bMove, opts = {}) {
   const mapKey = a.mapKey || (map ? map.key : '');
   if (mapKey !== (b.mapKey || mapKey)) return;
   const winner = exchangeWinner(a, b, aMove, bMove);
+  if (opts.snap) {
+    const target = opts.snapHit ? b : (opts.missPoint || emptyTileNear(b.x, b.y, mapKey));
+    if (weaponOf(a).type === 'ranged') {
+      emitFx({ kind: 'shot', mapKey, from: { x: a.x, y: a.y }, to: { x: target.x, y: target.y }, color: shotColorFor(a) });
+    }
+    if ((winner === 'b' || winner === 'both') && weaponOf(b).type === 'ranged') {
+      emitFx({ kind: 'shot', mapKey, from: { x: b.x, y: b.y }, to: { x: a.x, y: a.y }, color: shotColorFor(b) });
+    }
+    return;
+  }
   const shots = winner === 'a' ? [[a, b]]
     : winner === 'b' ? [[b, a]]
     : winner === 'both' ? [[a, b], [b, a]]
@@ -2673,24 +2798,40 @@ function emitExchangeShots(a, b, aMove, bMove) {
     emitFx({ kind: 'shot', mapKey, from: { x: shooter.x, y: shooter.y }, to: { x: target.x, y: target.y }, color: shotColorFor(shooter) });
   }
 }
-function resolveExchange(a, b, aMove, bMove, aiRoll) {
+function resolveExchange(a, b, aMove, bMove, aiRoll, opts = {}) {
   const aPre = healthPct(a), bPre = healthPct(b);
   const messages = [];
-  emitExchangeShots(a, b, aMove, bMove);
+  const winner = exchangeWinner(a, b, aMove, bMove);
+  // A snap shot is a normal exchange with a 50% chance that a hit goes wide.
+  // The coin is only flipped when the exchange would actually land the shot.
+  const snapHit = !opts.snap ? true : ((winner === 'a' || winner === 'both') ? Math.random() >= 0.5 : false);
+  const missPoint = opts.snap && !snapHit ? emptyTileNear(b.x, b.y, a.mapKey || (map ? map.key : '')) : null;
+  emitExchangeShots(a, b, aMove, bMove, { snap: !!opts.snap, snapHit, missPoint });
   messages.push(`${a.name} chooses ${MOVE_LABEL[aMove]}; ${b.name} reacts with ${bMove ? MOVE_LABEL[bMove] : 'nothing'}.` + (aiRoll ? ` (d20 ${aiRoll})` : ''));
+  let missAnnounced = false;
+  const hitB = (amount) => {
+    if (opts.snap && !snapHit) {
+      if (!missAnnounced) {
+        missAnnounced = true;
+        messages.push(`${a.name}'s snap shot misses${missPoint ? ' and strikes an empty tile' : ''}.`);
+      }
+      return 0;
+    }
+    return dealCombatDamage(b, amount, messages);
+  };
   if (!bMove) {
     const w = weaponOf(a);
-    messages.push(`${b.name} was caught unaware, ${a.name} ${w.sucker} them.`);
-    dealCombatDamage(b, damageWithWeapon(a) * critWithWeapon(a), messages);
+    const dealt = hitB(damageWithWeapon(a) * critWithWeapon(a));
+    if (dealt > 0) messages.push(`${b.name} was caught unaware, ${a.name} ${w.sucker} them.`);
   } else if (aMove === 'strike') {
     if (bMove === 'strike') {
       const aDmg = damageWithWeapon(a) + 0.25, bDmg = damageWithWeapon(b) + 0.25;
-      dealCombatDamage(b, aDmg, messages);
+      const aDealt = hitB(aDmg);
       dealCombatDamage(a, bDmg, messages);
-      messages.push(`Both ${a.name} and ${b.name} struck each other.`);
+      messages.push(aDealt > 0 ? `Both ${a.name} and ${b.name} struck each other.` : `${b.name} struck ${a.name}; ${a.name}'s snap shot went wide.`);
     } else if (bMove === 'grapple') {
-      dealCombatDamage(b, damageWithWeapon(a), messages);
-      messages.push(`${a.name} ${attackVerb(a, choice(MISS.strike))} ${b.name}'s ${choice(HIT_ZONE)}.`);
+      const dealt = hitB(damageWithWeapon(a));
+      if (dealt > 0) messages.push(`${a.name} ${attackVerb(a, choice(MISS.strike))} ${b.name}'s ${choice(HIT_ZONE)}.`);
     } else if (bMove === 'counter') {
       dealCombatDamage(a, damageWithWeapon(b), messages);
       messages.push(`${b.name} saw ${a.name} telegraph their move, and countered by deflecting the shot and ${attackVerb(b, choice(MISS.strike))} their ${choice(HIT_ZONE)}.`);
@@ -2706,23 +2847,26 @@ function resolveExchange(a, b, aMove, bMove, aiRoll) {
         dealCombatDamage(a, damageWithWeapon(b), messages);
         messages.push(`${b.name} ${attackVerb(b, choice(MISS.grapple))} ${a.name}'s ${choice(GRAPPLE_ZONE)}.`);
       } else {
-        dealCombatDamage(b, damageWithWeapon(a), messages);
-        messages.push(`${a.name} ${attackVerb(a, choice(MISS.grapple))} ${b.name}'s ${choice(GRAPPLE_ZONE)}.`);
+        const dealt = hitB(damageWithWeapon(a));
+        if (dealt > 0) messages.push(`${a.name} ${attackVerb(a, choice(MISS.grapple))} ${b.name}'s ${choice(GRAPPLE_ZONE)}.`);
       }
     } else if (bMove === 'counter') {
-      dealCombatDamage(b, damageWithWeapon(a), messages);
-      messages.push(`${a.name} ${attackVerb(a, choice(MISS.grapple))} ${b.name}'s ${choice(GRAPPLE_ZONE)}.`);
+      const dealt = hitB(damageWithWeapon(a));
+      if (dealt > 0) messages.push(`${a.name} ${attackVerb(a, choice(MISS.grapple))} ${b.name}'s ${choice(GRAPPLE_ZONE)}.`);
     }
   } else if (aMove === 'counter') {
     if (bMove === 'strike') {
-      dealCombatDamage(b, damageWithWeapon(a), messages);
-      messages.push(`${a.name} saw ${b.name} telegraph their move, and countered by deflecting the shot and ${attackVerb(a, choice(MISS.strike))} their ${choice(HIT_ZONE)}.`);
+      const dealt = hitB(damageWithWeapon(a));
+      if (dealt > 0) messages.push(`${a.name} saw ${b.name} telegraph their move, and countered by deflecting the shot and ${attackVerb(a, choice(MISS.strike))} their ${choice(HIT_ZONE)}.`);
     } else if (bMove === 'grapple') {
       dealCombatDamage(a, damageWithWeapon(b), messages);
       messages.push(`${b.name} ${attackVerb(b, choice(MISS.grapple))} ${a.name}'s ${choice(GRAPPLE_ZONE)}.`);
     } else if (bMove === 'counter') {
       messages.push(`${a.name} and ${b.name} stare each other down.`);
     }
+  }
+  if (opts.snap && !snapHit && !missAnnounced) {
+    messages.push(`${a.name}'s snap shot misses${missPoint ? ' and strikes an empty tile' : ''}.`);
   }
   healthConditions(a, aPre, healthPct(a), messages);
   healthConditions(b, bPre, healthPct(b), messages);
@@ -2738,9 +2882,12 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   if (isDown(a)) return { error: a.name + ' is down.' };
   if (isDown(b)) return { error: b.name + ' is already down.' };
   if (!MOVE_LABEL[move]) return { error: 'Choose Strike, Grapple or Counter.' };
-  if (settings.turnBased && !opts.fromQueue) {
+  const shot = opts.shot || (weaponOf(a).type === 'ranged' ? 'aimed' : 'melee');
+  if (settings.turnBased && !opts.fromQueue && !opts.reflex) {
     if (turn.activeId !== a.id) return { error: 'It is not ' + a.name + "'s turn." };
-    if (turn.attacked && turn.attacked[a.id]) return { error: a.name + ' has already attacked this turn.' };
+  }
+  if (settings.turnBased && !opts.fromQueue && !opts.reflex && usesAp(a) && !canPayAp(a, shot)) {
+    return { error: `${a.name} needs ${apCostFor(shot)} AP for a ${AP_LABEL[shot] || 'attack'}.` };
   }
   if (role === 'player' && (a.layer !== 'player' || b.layer !== 'gm')) return { error: 'Players may only attack hostiles.' };
   const reach = combatReach(a, b);
@@ -2753,10 +2900,10 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
     const ai = aiReaction(move);
     bMove = ai.move; aiRoll = ai.roll;
   }
-  if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
+  if (settings.turnBased && !opts.fromQueue && !opts.reflex && usesAp(a)) payAp(a, shot);
   missionToken(a); missionToken(b);
   missionDamageCtx = [];
-  const messages = resolveExchange(a, b, move, bMove, aiRoll);
+  const messages = resolveExchange(a, b, move, bMove, aiRoll, { snap: !!opts.snap || shot === 'snap' });
   if (outranged) messages.push(`${b.name} has no ranged weapon and cannot answer at this range.`);
   let aDamageTaken = 0, bDamageTaken = 0;
   for (const hit of missionDamageCtx) {
@@ -2793,11 +2940,9 @@ function performForcedExchange(attackerId, targetId, outcome, opts = {}) {
   if (isDown(b)) return { error: b.name + ' is already down.' };
   if (settings.turnBased && !opts.fromQueue) {
     if (turn.activeId !== a.id) return { error: 'It is not ' + a.name + "'s turn." };
-    if (turn.attacked && turn.attacked[a.id]) return { error: a.name + ' has already attacked this turn.' };
   }
   const reach = combatReach(a, b);
   if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
-  if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[a.id] = true; }
 
   // Resolve the requested outcome through a concrete winning/losing stance
   // pair (Strike/Grapple for a win, Counter/Grapple for a loss), so the log
@@ -2836,12 +2981,19 @@ function submitCombat() {
   const b = tokenById(+$('#combatTarget').value);
   if (!a || !b) { closeCombat(); return; }
   const move = combatChosenMove;
+  const shot = weaponOf(a).type === 'ranged' ? (a.layer === 'player' ? combatChosenShot : 'aimed') : 'melee';
+  const cost = apCostFor(shot);
+  if (usesAp(a) && !canPayAp(a, shot)) {
+    const box = $('#combatResult'); box.hidden = false;
+    box.textContent = `${a.name} needs ${cost} AP for a ${AP_LABEL[shot] || 'attack'} (${fmt(apLeft(a))} left).`;
+    return;
+  }
   if (role === 'player') {
     if (sessionRole !== 'player' || !net) { showMsg('Not connected.'); return; }
     if (!hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
-    net.sendAction({ type: 'attack', attackerId: a.id, targetId: b.id, move }).catch(() => showMsg('Could not send the attack.'));
+    net.sendAction({ type: 'attack', attackerId: a.id, targetId: b.id, move, shot }).catch(() => showMsg('Could not send the attack.'));
     closeCombat();
-    showMsg('Attack queued for the GM.');
+    showMsg(`${AP_LABEL[shot]} queued for the GM · ${cost} AP.`);
     return;
   }
   if (FORCE_MOVES[move]) {
@@ -2853,7 +3005,7 @@ function submitCombat() {
     closeCombat(); return;
   }
   if (!rangedAutoLoss(a, b) && b.layer === 'player' && requestPlayerDefense(a, b, move)) { closeCombat(); return; }
-  const result = performAttack(a.id, b.id, move, 'auto');
+  const result = performAttack(a.id, b.id, move, 'auto', false, { shot });
   if (result.error) {
     const box = $('#combatResult'); box.hidden = false; box.textContent = result.error;
     return;
@@ -2900,6 +3052,10 @@ function clearDefenseRequests() {
   pendingDefense.clear();
 }
 $('#combatGo').onclick = submitCombat;
+$('#combatShot').onchange = () => {
+  combatChosenShot = $('#combatShot').value === 'snap' ? 'snap' : 'aimed';
+  updateCombatDialog();
+};
 $('#combatClose').onclick = closeCombat;
 $('#combatCancel').onclick = closeCombat;
 $('#combatDlg').addEventListener('cancel', e => { e.preventDefault(); closeCombat(); });
@@ -2949,8 +3105,64 @@ $('#defenseClose').onclick = closeDefense;
 $('#defenseDlg').addEventListener('cancel', e => { e.preventDefault(); closeDefense(); });
 $('#defenseDlg').addEventListener('click', e => { if (e.target === $('#defenseDlg')) closeDefense(); });
 
+function showReflexRequest(data) {
+  if (!data || !data.requestId) return;
+  const mover = tokenById(data.moverId), shooter = tokenById(data.shooterId);
+  if (!mover || !shooter || shooter.id !== me.tokenId) return;
+  if (reflexContext) closeReflexDialog();
+  const timeout = Math.max(1000, +data.timeoutMs || REFLEX_TIMEOUT_MS);
+  reflexContext = {
+    requestId: data.requestId, moverId: data.moverId, shooterId: data.shooterId,
+    deadline: Date.now() + timeout, timer: 0
+  };
+  const w = weaponOf(shooter);
+  $('#reflexTargetName').textContent = mover.name;
+  $('#reflexTargetStats').textContent = `HP ${mover.hp}/${mover.maxHp} · ${weaponOf(mover).label}`;
+  $('#reflexShooterName').textContent = shooter.name;
+  $('#reflexShooterStats').textContent = `${w.label} · ${fmt(apLeft(shooter))} AP left`;
+  $('#reflexNote').textContent = `Spend ${data.cost || apCostFor('snap')} AP on a snap shot. Half of all snap-shot hits go wide.`;
+  const tick = () => {
+    if (!reflexContext) return;
+    const left = Math.max(0, Math.ceil((reflexContext.deadline - Date.now()) / 1000));
+    $('#reflexCountdown').textContent = `Window closes in ${left}s.`;
+    if (left <= 0) closeReflexDialog();
+  };
+  tick();
+  reflexContext.timer = setInterval(tick, 250);
+  $('#reflexFire').disabled = false;
+  $('#reflexHold').disabled = false;
+  const dlg = $('#reflexDlg');
+  if (!dlg.open) dlg.showModal();
+}
+function closeReflexDialog() {
+  if (reflexContext) { clearInterval(reflexContext.timer); reflexContext = null; }
+  const dlg = $('#reflexDlg');
+  if (dlg.open) dlg.close();
+}
+function sendReflex(accept) {
+  if (!reflexContext) return;
+  if (sessionRole !== 'player' || !net) { showMsg('Not connected.'); return; }
+  const ctx = reflexContext;
+  net.sendAction({ type: 'reflex', requestId: ctx.requestId, accept: !!accept })
+    .catch(() => showMsg('Could not send your reflex answer.'));
+  $('#reflexFire').disabled = true;
+  $('#reflexHold').disabled = true;
+  showMsg(accept ? 'Reflex shot sent.' : 'Holding fire.');
+  setTimeout(closeReflexDialog, 300);
+}
+$('#reflexFire').onclick = () => sendReflex(true);
+$('#reflexHold').onclick = () => sendReflex(false);
+$('#reflexDlg').addEventListener('cancel', e => { e.preventDefault(); sendReflex(false); });
+$('#reflexDlg').addEventListener('click', e => { if (e.target === $('#reflexDlg')) sendReflex(false); });
+
 function handleNotice(text, data) {
   if (data && data.kind === 'defenseRequest') { showDefenseRequest(data); return; }
+  if (data && data.kind === 'reflexRequest') { showReflexRequest(data); return; }
+  if (data && data.kind === 'reflexCancel') {
+    if (reflexContext && reflexContext.requestId === data.requestId) { closeReflexDialog(); showMsg(text); }
+    return;
+  }
+  if (data && data.kind === 'reflexAck') return;
   if (data && data.kind === 'defenseCancel') {
     if (incomingDefense && incomingDefense.requestId === data.requestId) { incomingDefense = null; closeDefense(); }
     showMsg(text);
@@ -3072,7 +3284,11 @@ function inventoryEditor(t, editable) {
       const isGrenade = !!grenadeFor(it.name), isMedkit = isMedkitItem(it.name);
       const use = document.createElement('button'); use.type = 'button'; use.className = 'mini';
       use.textContent = isGrenade ? 'Throw' : isMedkit ? 'Heal' : 'Use';
-      use.title = isGrenade ? 'Throw one at a target square' : isMedkit ? 'Heal yourself or someone adjacent' : 'Use one';
+      const useCost = apCostFor('use');
+      const canUse = !usesAp(t) || canPayAp(t, 'use');
+      use.disabled = !canUse;
+      use.title = (!canUse ? `Needs ${useCost} AP. ` : '') +
+        (isGrenade ? `Throw one at a target square · ${useCost} AP` : isMedkit ? `Heal yourself or someone adjacent · ${useCost} AP` : `Use one · ${useCost} AP`);
       use.onclick = () => useItem(t, idx);
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'mini x'; rm.textContent = '×'; rm.title = 'Remove';
       rm.onclick = () => { t.inventory.splice(idx, 1); commitInventory(t); };
@@ -3178,11 +3394,12 @@ function startGrenadeTarget(t, idx) {
     if (t.id !== me.tokenId) { showMsg('You can only throw your own grenades.'); return; }
     if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
     if (settings.turnBased && turn.activeId !== t.id) { showMsg('You can only throw grenades on your turn.'); return; }
+    if (usesAp(t) && !canPayAp(t, 'use')) { showMsg(`${t.name} needs ${apCostFor('use')} AP to throw a grenade (${fmt(apLeft(t))} left).`); return; }
   }
   pendingGrenade = { tokenId: t.id, itemName: it.name, kind: g.kind, radius: g.radius, x: null, y: null };
   cv.focus({ preventScroll: true });
   setHint(null); invalidate();
-  showMsg(`Choose a target for ${it.name} · range ${fmt(grenadeThrowRange(t))} sq · click the map, Esc cancels.`);
+  showMsg(`Choose a target for ${it.name} · range ${fmt(grenadeThrowRange(t))} sq · ${apCostFor('use')} AP · click the map, Esc cancels.`);
 }
 function cancelGrenadeTarget() {
   if (!pendingGrenade) return;
@@ -3244,7 +3461,9 @@ function openMedkitDialog(t, idx) {
   if (role === 'player') {
     if (t.id !== me.tokenId) { showMsg('You can only use your own medkits.'); return; }
     if (!net || !hostOnline || netState !== 'live') { showMsg('The GM is offline. The table is paused.'); return; }
+    if (settings.turnBased && turn.activeId !== t.id) { showMsg('You can only use a medkit on your turn.'); return; }
   }
+  if (usesAp(t) && !canPayAp(t, 'use')) { showMsg(`${t.name} needs ${apCostFor('use')} AP to use a medkit (${fmt(apLeft(t))} left).`); return; }
   const targets = medkitTargetsFor(t);
   if (!targets.length) { showMsg('Nobody within reach needs healing.'); return; }
   medkitContext = { userId: t.id, itemName: it.name };
@@ -3258,7 +3477,7 @@ function openMedkitDialog(t, idx) {
     o.textContent = `${target.name} · ${target.hp}/${target.maxHp} HP${isDown(target) ? ' · down' : ''}`;
     sel.append(o);
   }
-  $('#medkitNote').textContent = `Restores up to ${MEDKIT_HEAL} HP to the medic or an adjacent character.`;
+  $('#medkitNote').textContent = `Restores up to ${MEDKIT_HEAL} HP to the medic or an adjacent character. Costs ${apCostFor('use')} AP.`;
   $('#medkitResult').hidden = true;
   updateMedkitDialog();
   const dlg = $('#medkitDlg');
@@ -3328,6 +3547,14 @@ function applyMedkit(user, itemName, targetId) {
 }
 function useItem(t, idx) {
   const it = t.inventory[idx]; if (!it) return;
+  if (role === 'player' && settings.turnBased && turn.activeId !== t.id) {
+    showMsg('You can only use items on your turn.');
+    return;
+  }
+  if (role === 'player' && usesAp(t) && !canPayAp(t, 'use')) {
+    showMsg(`${t.name} needs ${apCostFor('use')} AP to use an item (${fmt(apLeft(t))} left).`);
+    return;
+  }
   if (isMedkitItem(it.name)) { openMedkitDialog(t, idx); return; }
   if (grenadeFor(it.name)) { startGrenadeTarget(t, idx); return; }
   if (role === 'player') {
@@ -3381,7 +3608,20 @@ function removeToken(id) {
   imgs.delete(id); openStats.delete(id);
   roster.forEach(r => { if (r.tokenId === id) r.tokenId = null; });
   if (selected === id) selected = null;
-  if (turn.activeId === id) { turn.activeId = null; turn.moved = {}; turn.attacked = {}; }
+  if (turn.activeId === id) { turn.activeId = null; turn.moved = {}; }
+  for (const [qid, entry] of [...pendingPlayerAttacks]) {
+    if (entry.attackerId !== id && entry.targetId !== id) continue;
+    pendingPlayerAttacks.delete(qid);
+    refundAp(tokenById(entry.attackerId), entry.cost || 0);
+    net && net.notify(entry.clientId, 'Your queued attack was cancelled: a combatant was removed.');
+  }
+  for (const [did, entry] of [...pendingDefense]) {
+    if (entry.attackerId !== id && entry.targetId !== id) continue;
+    clearTimeout(entry.timer);
+    pendingDefense.delete(did);
+    net && net.notify(entry.clientId, 'The incoming attack was cancelled: a combatant was removed.', { kind: 'defenseCancel', requestId: did });
+  }
+  if (reflexWindow && reflexWindow.moverId === id) clearReflexWindow();
   changed();
 }
 function clearAllHostiles() {
@@ -3395,6 +3635,7 @@ function clearAllHostiles() {
   for (const [id, entry] of [...pendingPlayerAttacks]) {
     if (!ids.has(entry.targetId)) continue;
     pendingPlayerAttacks.delete(id);
+    refundAp(tokenById(entry.attackerId), entry.cost || 0);
     net && net.notify(entry.clientId, 'Your queued attack was cancelled: the target was removed.');
   }
   for (const [id, entry] of [...pendingDefense]) {
@@ -3404,7 +3645,8 @@ function clearAllHostiles() {
     net && net.notify(entry.clientId, 'The incoming attack was cancelled: the attacker was removed.', { kind: 'defenseCancel', requestId: id });
   }
   if (ids.has(selected)) selected = null;
-  if (ids.has(turn.activeId)) { turn.activeId = null; turn.moved = {}; turn.attacked = {}; }
+  if (ids.has(turn.activeId)) { turn.activeId = null; turn.moved = {}; }
+  if (reflexWindow && ids.has(reflexWindow.moverId)) clearReflexWindow();
   if (hoverTok && ids.has(hoverTok.id)) hoverTok = null;
   logEvent(`GM clears ${ids.size} hostile token${ids.size === 1 ? '' : 's'}.`);
   changed();
@@ -3418,39 +3660,29 @@ function addToken(layer) {
   const name = $('#newName').value.trim() || (layer === 'gm' ? 'Hostile ' : 'Player ') + n;
   const stats = normalizeStats(null, layer, size);
   const derived = computeStats(stats);
-  const t = { id: nextId++, layer, mapKey: map.key, status: '', hp: derived.maxHp, maxHp: derived.maxHp, stats, weapon: '', name, color: $('#newColor').value, size, inventory: [], img: '', x: (r.width / 2 - view.x) / view.k, y: (r.height / 2 - view.y) / view.k };
+  const t = { id: nextId++, layer, mapKey: map.key, status: '', hp: derived.maxHp, maxHp: derived.maxHp, ap: layer === 'player' ? apMax() : 0, stats, weapon: '', name, color: $('#newColor').value, size, inventory: [], img: '', x: (r.width / 2 - view.x) / view.k, y: (r.height / 2 - view.y) / view.k };
   snapTok(t); tokens.push(t); selected = t.id; $('#newName').value = ''; changed();
 }
 $('#addPlayer').onclick = () => addToken('player'); $('#addGm').onclick = () => addToken('gm');
 $('#clearHostiles').onclick = clearAllHostiles;
 
-function actionPoints(t) {
-  if (!t || !settings.turnBased || settings.moveLimit <= 0) return Infinity;
-  return Math.max(0, settings.moveLimit - (turn.moved[t.id] || 0));
-}
-function actionPointLabel(t) {
-  const ap = actionPoints(t);
-  return ap === Infinity ? '∞' : fmt(ap);
-}
+function actionPoints(t) { return apLeft(t); }
+function actionPointLabel(t) { return apStateLabel(t); }
 function renderApHud() {
   const el = $('#apHud');
   if (!el) return;
   const t = sessionRole === 'player' ? tokenById(me.tokenId) : null;
-  if (!t || setupPhase || !settings.turnBased || turn.activeId !== t.id) {
+  if (!t || setupPhase || !settings.turnBased) {
     el.hidden = true;
     return;
   }
-  const ap = actionPoints(t);
-  const unlimited = settings.moveLimit <= 0;
-  const left = unlimited ? '∞' : fmt(ap);
+  const ap = apLeft(t), max = apMax();
   el.hidden = false;
-  el.dataset.turn = 'true';
-  el.dataset.empty = (!unlimited && ap <= 0) ? 'true' : 'false';
-  $('#apHudValue').textContent = left;
-  $('#apHudBar').style.width = (unlimited ? 100 : Math.max(0, Math.min(100, (ap / settings.moveLimit) * 100))) + '%';
-  const label = unlimited
-    ? 'Action points: movement is unlimited this turn.'
-    : `Action points: ${fmt(ap)} of ${fmt(settings.moveLimit)} left this turn.`;
+  el.dataset.turn = turn.activeId === t.id ? 'true' : 'false';
+  el.dataset.empty = ap <= 0 ? 'true' : 'false';
+  $('#apHudValue').textContent = `${fmt(ap)}/${fmt(max)}`;
+  $('#apHudBar').style.width = Math.max(0, Math.min(100, (ap / max) * 100)) + '%';
+  const label = `Action points: ${fmt(ap)} of ${fmt(max)}. ${apCostSummary()}.`;
   el.setAttribute('aria-label', label);
   el.title = label;
 }
@@ -3494,17 +3726,22 @@ function renderSheet() {
   }
   const hud = document.createElement('div'); hud.className = 'playerhud';
   const ap = document.createElement('span'); ap.className = 'apmeter';
-  ap.title = settings.turnBased ? (settings.moveLimit > 0 ? 'Action points left this turn (movement squares).' : 'Movement is unlimited this turn.') : 'Free movement is on.';
-  ap.setAttribute('aria-label', 'Action points: ' + actionPointLabel(t) + ' moves left');
+  ap.title = settings.turnBased
+    ? `${apStateLabel(t)} AP left · ${apCostSummary()}. Leftover AP can pay for reflex shots.`
+    : 'Free movement is on.';
+  ap.setAttribute('aria-label', `Action points: ${apStateLabel(t)}`);
   const apKey = document.createElement('b'); apKey.textContent = 'AP';
   const apVal = document.createElement('span'); apVal.textContent = actionPointLabel(t);
-  if (settings.turnBased && settings.moveLimit > 0 && actionPoints(t) <= 0) ap.classList.add('empty');
+  if (settings.turnBased && actionPoints(t) <= 0) ap.classList.add('empty');
   ap.append(apKey, apVal);
   const turnBtn = document.createElement('button'); turnBtn.type = 'button'; turnBtn.className = 'btn primary tiny'; turnBtn.textContent = 'End turn';
   turnBtn.disabled = !myTurn || isDown(t) || !hostOnline || netState !== 'live';
   turnBtn.title = myTurn ? 'End your turn and advance the table to the next character.' : 'You can only end your own turn.';
   turnBtn.onclick = () => endPlayerTurn(t);
   hud.append(ap, turnBtn); body.append(hud);
+  const costs = document.createElement('div'); costs.className = 'sub apcosts';
+  costs.textContent = settings.turnBased ? apCostSummary() : 'Action costs apply when turn-based play is on.';
+  body.append(costs);
   body.append(hpBlock(t, true, false));
   body.append(combatRow(t));
   const loot = lootRow(t); if (loot) body.append(loot);
@@ -3513,7 +3750,7 @@ function renderSheet() {
   const lab = document.createElement('div'); lab.className = 'invhead'; lab.append(Object.assign(document.createElement('span'), { textContent: 'Inventory' }));
   inv.append(lab, inventoryEditor(t, true)); body.append(inv);
   const hint = document.createElement('div'); hint.className = 'sub';
-  hint.textContent = settings.turnBased ? (myTurn ? 'Your turn: drag, attack a hostile, click doors to ask for them, use items, or press End turn.' : 'Wait for the GM to assign your turn.') : 'Free movement is on. Drag, attack, or use items when ready.';
+  hint.textContent = settings.turnBased ? (myTurn ? 'Your turn: drag, attack, pick up loot, use items, or press End turn. Leftover AP can pay for reflex shots while others move.' : 'Wait for the GM to assign your turn. Leftover AP can pay for reflex shots while hostiles move.') : 'Free movement is on. Drag, attack, or use items when ready.';
   body.append(hint);
 }
 
@@ -3619,7 +3856,9 @@ function renderTurnOrder() {
     const meta = document.createElement('span'); meta.className = 'mono muted';
     const moved = turn.moved[t.id] || 0;
     const offLevel = map && t.mapKey && t.mapKey !== map.key;
-    meta.textContent = (t.layer === 'gm' ? 'hostile' : 'player') + (offLevel ? ` · ${mapLabel(MAP_BY_ID.get(t.mapKey))}` : '') + (turn.activeId === t.id && settings.moveLimit > 0 ? ` · ${fmt(moved)}/${fmt(settings.moveLimit)} sq` : '') + (settings.turnBased && turn.attacked && turn.attacked[t.id] ? ' · attacked' : '');
+    meta.textContent = (t.layer === 'gm' ? 'hostile' : `AP ${apStateLabel(t)}`) +
+      (offLevel ? ` · ${mapLabel(MAP_BY_ID.get(t.mapKey))}` : '') +
+      (turn.activeId === t.id && moved > 0 ? ` · ${fmt(moved)} sq` : '');
     const b = document.createElement('button'); b.type = 'button'; b.className = 'btn tiny' + (turn.activeId === t.id ? ' primary' : '');
     b.textContent = turn.activeId === t.id ? 'Active' : 'Give turn'; b.disabled = isDown(t);
     b.onclick = () => assignTurn(t.id);
@@ -3648,8 +3887,9 @@ function beginTurnFor(t) {
   if (!t) return;
   const prev = tokenById(turn.activeId);
   if (prev) finishTurnEffects(prev);
-  turn.number++; turn.activeId = t.id; turn.moved = {}; turn.attacked = {}; selected = t.id;
-  logEvent(`Turn ${turn.number}: ${t.name}.`);
+  turn.number++; turn.activeId = t.id; turn.moved = {}; selected = t.id;
+  if (t.layer === 'player') t.ap = apMax();
+  logEvent(`Turn ${turn.number}: ${t.name}.` + (t.layer === 'player' ? ` ${fmt(t.ap)} AP.` : ''));
   startTurnEffects(t);
   if (t.mapKey && map && t.mapKey !== map.key) selectMap(t.mapKey, { silent: true });
   changed();
@@ -3669,6 +3909,157 @@ function nextTurn(dir) {
   if (idx < 0) idx = dir > 0 ? -1 : 0;
   const next = alive[(idx + dir + alive.length) % alive.length];
   beginTurnFor(next);
+}
+
+/* ---------- reflex shots on movement ---------- */
+// A hostile that walks into a player's sight pauses there; every eligible
+// player (ranged weapon, enough AP, online controller) is offered one snap
+// shot. Answers or a 15s timeout resume the move.
+function playerCanSeePoint(p, x, y) {
+  if (!p || p.layer !== 'player' || isDown(p) || !map) return false;
+  if (p.mapKey && p.mapKey !== map.key) return false;
+  const R = sightSquaresFor(p) * map.ppg;
+  if (Math.hypot(p.x - x, p.y - y) > R + 1e-6) return false;
+  if (inSmoke(x, y, p.mapKey || map.key)) return false;
+  if (!isLit(x, y)) return false;
+  return grenadeLineOfSight(p, x, y);
+}
+function reflexShootersAt(mover, x, y) {
+  if (!settings.turnBased || !layers.gm.vis) return [];
+  const key = mover.mapKey || (map ? map.key : '');
+  return tokens.filter(p => {
+    if (!p || p.layer !== 'player' || isDown(p)) return false;
+    if ((p.mapKey || (map && map.key)) !== key) return false;
+    if (weaponOf(p).type !== 'ranged') return false;
+    if (!usesAp(p) || apLeft(p) + 1e-9 < apCostFor('snap')) return false;
+    const owner = controllerOf(p.id);
+    if (!owner || !owner.online) return false;
+    return playerCanSeePoint(p, x, y);
+  });
+}
+function pathSamples(sx, sy, tx, ty, step) {
+  const dist = Math.hypot(tx - sx, ty - sy);
+  if (dist < 1) return [{ x: tx, y: ty }];
+  const n = Math.max(1, Math.min(240, Math.ceil(dist / Math.max(1, step))));
+  const out = [];
+  for (let i = 1; i <= n; i++) out.push({ x: sx + (tx - sx) * i / n, y: sy + (ty - sy) * i / n });
+  return out;
+}
+function promptReflexWindow(mover, shooters) {
+  return new Promise(resolve => {
+    const id = 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const prompted = [];
+    const w = { id, moverId: mover.id, responses: new Map(), prompted, timer: 0, resolve };
+    reflexWindow = w;
+    for (const p of shooters) {
+      const owner = controllerOf(p.id);
+      if (!owner || !owner.online || !net) continue;
+      prompted.push({ clientId: owner.clientId, tokenId: p.id });
+      net.notify(owner.clientId, `${mover.name} enters ${p.name}'s sight. Fire a reflex snap shot?`, {
+        kind: 'reflexRequest', requestId: id, moverId: mover.id, shooterId: p.id,
+        cost: apCostFor('snap'), timeoutMs: REFLEX_TIMEOUT_MS
+      });
+    }
+    if (!prompted.length) { reflexWindow = null; resolve(new Map()); return; }
+    logEvent(`Reflex window: ${shooters.map(p => p.name).join(', ')} may snap-shoot ${mover.name}.`, 'combat');
+    w.timer = setTimeout(() => finishReflexWindow(id), REFLEX_TIMEOUT_MS);
+  });
+}
+function finishReflexWindow(id) {
+  const w = reflexWindow;
+  if (!w || w.id !== id) return;
+  clearTimeout(w.timer);
+  reflexWindow = null;
+  for (const pr of w.prompted) {
+    if (!w.responses.has(pr.tokenId) && net) {
+      net.notify(pr.clientId, 'Reflex window closed — you hold fire.', { kind: 'reflexCancel', requestId: id });
+    }
+  }
+  w.resolve(w.responses);
+}
+function clearReflexWindow() {
+  const w = reflexWindow;
+  if (!w) return;
+  clearTimeout(w.timer);
+  reflexWindow = null;
+  for (const pr of w.prompted) if (net) net.notify(pr.clientId, 'Reflex window closed.', { kind: 'reflexCancel', requestId: w.id });
+  w.resolve(new Map());
+}
+async function resolveReflexShots(mover, shooters, responses) {
+  for (const p of shooters) {
+    if (!responses.get(p.id) || isDown(mover)) continue;
+    if (!tokenById(p.id)) continue;
+    if (isDown(p)) { net && net.notify((controllerOf(p.id) || {}).clientId, `${p.name} is down and cannot shoot.`); continue; }
+    if (!playerCanSeePoint(p, mover.x, mover.y)) {
+      net && net.notify((controllerOf(p.id) || {}).clientId, `${p.name} loses sight of ${mover.name}.`);
+      continue;
+    }
+    const cost = apCostFor('snap');
+    if (!canPayAp(p, 'snap')) {
+      net && net.notify((controllerOf(p.id) || {}).clientId, `${p.name} no longer has ${cost} AP for the reflex shot.`);
+      continue;
+    }
+    payAp(p, 'snap');
+    logEvent(`${p.name} takes a reflex snap shot at ${mover.name} (${cost} AP).`, 'combat');
+    const result = performAttack(p.id, mover.id, 'strike', 'auto', false, { reflex: true, snap: true });
+    if (result.error) {
+      refundAp(p, cost);
+      net && net.notify((controllerOf(p.id) || {}).clientId, 'Reflex shot failed: ' + result.error);
+    } else {
+      net && net.notify((controllerOf(p.id) || {}).clientId, `Reflex shot resolved — ${mover.name} is at ${mover.hp}/${mover.maxHp} HP.`);
+    }
+  }
+}
+function moveProvokesReflex(t) {
+  return settings.turnBased && !setupPhase && !!t && t.layer === 'gm' && !!map && (t.mapKey || map.key) === map.key;
+}
+async function hostMoveToken(t, sx, sy, tx, ty, opts = {}) {
+  if (!t || !map) return;
+  if (reflexWindow) {
+    t.x = sx; t.y = sy;
+    changed(); scheduleSync();
+    if (opts.clientId && net) net.notify(opts.clientId, 'Wait for the reflex window to close.');
+    else showMsg('Wait for the reflex window to close.');
+    return;
+  }
+  const distPx = Math.hypot(tx - sx, ty - sy);
+  if (distPx < 0.5) return;
+  const dist = distPx / map.ppg;
+  if (opts.fromPlayer && usesAp(t) && !spendAp(t, dist)) {
+    if (opts.clientId && net) net.notify(opts.clientId, `Not enough AP for that move (${fmt(dist)} needed, ${fmt(apLeft(t))} left).`);
+    scheduleSync();
+    return;
+  }
+  addMissionDistance(t, dist);
+  if (settings.turnBased) turn.moved[t.id] = (turn.moved[t.id] || 0) + dist;
+  t.x = sx; t.y = sy;
+  if (!moveProvokesReflex(t)) {
+    t.x = tx; t.y = ty; fogDirty = true; changed(); return;
+  }
+  const samples = pathSamples(sx, sy, tx, ty, map.ppg * 0.5);
+  const seen = new Map();
+  for (const p of tokens) if (p.layer === 'player') seen.set(p.id, playerCanSeePoint(p, sx, sy));
+  let i = 0;
+  while (i < samples.length) {
+    let newSeers = [], point = null;
+    for (; i < samples.length; i++) {
+      const s = samples[i];
+      newSeers = reflexShootersAt(t, s.x, s.y).filter(p => !seen.get(p.id));
+      for (const p of tokens) {
+        if (p.layer === 'player' && playerCanSeePoint(p, s.x, s.y)) seen.set(p.id, true);
+      }
+      if (newSeers.length) { point = s; i++; break; }
+    }
+    if (!newSeers.length) break;
+    t.x = point.x; t.y = point.y; fogDirty = true; changed();
+    logEvent(`${t.name} comes into view; the move pauses for reflex shots.`, 'combat');
+    const responses = await promptReflexWindow(t, newSeers);
+    if (!tokenById(t.id)) return;
+    await resolveReflexShots(t, newSeers, responses);
+    if (isDown(t)) { fogDirty = true; changed(); return; }
+    if (reflexWindow) return; // a nested window should not happen; stop rather than skip it
+  }
+  t.x = tx; t.y = ty; fogDirty = true; changed();
 }
 
 function renderLog() {
@@ -4150,6 +4541,17 @@ async function handleAction(msg) {
       resolvePlayerDefense(entry.requestId, action.move);
       return;
     }
+    case 'reflex': {
+      const w = reflexWindow;
+      if (!w || w.id !== String(action.requestId || '')) { net.notify(clientId, 'That reflex window has already closed.'); return; }
+      const pr = w.prompted.find(x => x.clientId === clientId);
+      if (!pr) { net.notify(clientId, 'You have no reflex shot in this window.'); return; }
+      w.responses.set(pr.tokenId, !!action.accept);
+      logEvent(`${member.name} ${action.accept ? 'takes the reflex shot' : 'holds fire'}.`, 'combat');
+      net.notify(clientId, action.accept ? 'Reflex shot accepted.' : 'Holding fire.', { kind: 'reflexAck', requestId: w.id });
+      if (w.responses.size >= w.prompted.length) finishReflexWindow(w.id);
+      return;
+    }
     case 'useStair': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use a stair with your own character.'); return; }
       if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
@@ -4178,18 +4580,13 @@ async function handleAction(msg) {
       let nx = p.x, ny = p.y;
       if (settings.snap) { const tmp = { size: own.size, x: nx, y: ny }; snapTok(tmp); if (!blockedMove(nx, ny, tmp.x, tmp.y)) { nx = tmp.x; ny = tmp.y; } }
       const dist = Math.hypot(nx - sx, ny - sy) / map.ppg;
-      if (settings.turnBased && settings.moveLimit > 0) {
-        const used = turn.moved[own.id] || 0;
-        if (used + dist > settings.moveLimit + 1e-6) {
-          net.notify(clientId, `That would use ${fmt(used + dist)} squares; only ${fmt(settings.moveLimit)} are allowed this turn.`);
-          scheduleSync(); return;
-        }
+      if (usesAp(own) && apLeft(own) + 1e-9 < dist) {
+        net.notify(clientId, `That move needs ${fmt(dist)} AP; ${own.name} has ${fmt(apLeft(own))} left this turn.`);
+        scheduleSync(); return;
       }
       if (Math.hypot(nx - sx, ny - sy) < 0.5) { net.notify(clientId, 'That move is blocked.'); scheduleSync(); return; }
-      own.x = nx; own.y = ny;
-      addMissionDistance(own, dist);
-      if (settings.turnBased) turn.moved[own.id] = (turn.moved[own.id] || 0) + dist;
-      fogDirty = true; changed(); return;
+      await hostMoveToken(own, sx, sy, nx, ny, { fromPlayer: true, clientId });
+      return;
     }
     case 'hp': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only change your own HP.'); return; }
@@ -4208,21 +4605,27 @@ async function handleAction(msg) {
     case 'useMedkit': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use your own medkits.'); return; }
       if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
+      if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'You can only use a medkit on your turn.'); scheduleSync(); return; }
       const itemName = String(action.name || '');
       if (!isMedkitItem(itemName)) { net.notify(clientId, 'That item is not a medkit.'); return; }
+      if (usesAp(own) && !canPayAp(own, 'use')) { net.notify(clientId, `You need ${apCostFor('use')} AP to use a medkit (${fmt(apLeft(own))} left).`); scheduleSync(); return; }
       const result = applyMedkit(own, itemName, +action.targetId);
       if (result.error) { net.notify(clientId, result.error); scheduleSync(); return; }
-      net.notify(clientId, result.text);
+      payAp(own, 'use');
+      net.notify(clientId, `${result.text} (${apCostFor('use')} AP used)`);
       changed(); return;
     }
     case 'useItem': {
       if (!own || action.tokenId !== own.id) { net.notify(clientId, 'You can only use your own items.'); return; }
+      if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'You can only use items on your turn.'); scheduleSync(); return; }
       const it = own.inventory.find(x => x.name === String(action.name || ''));
       if (!it) return;
       if (isMedkitItem(it.name)) { net.notify(clientId, 'Choose a target for the medkit.'); return; }
       if (grenadeFor(it.name)) { net.notify(clientId, 'Choose a target square to throw that grenade.'); return; }
+      if (usesAp(own) && !canPayAp(own, 'use')) { net.notify(clientId, `You need ${apCostFor('use')} AP to use an item (${fmt(apLeft(own))} left).`); scheduleSync(); return; }
       it.qty--; if (it.qty <= 0) own.inventory = own.inventory.filter(x => x !== it);
       missionToken(own).items.push(it.name);
+      payAp(own, 'use');
       recordMissionAction(own, `Used ${it.name}.`);
       logEvent(`${member.name} uses ${it.name}.`); changed(); return;
     }
@@ -4235,11 +4638,13 @@ async function handleAction(msg) {
       const g = grenadeFor(itemName);
       if (!g) { net.notify(clientId, 'That item is not a grenade.'); return; }
       if (!own.inventory.some(x => x.name === itemName)) { net.notify(clientId, 'That grenade is no longer in your inventory.'); scheduleSync(); return; }
+      if (usesAp(own) && !canPayAp(own, 'use')) { net.notify(clientId, `You need ${apCostFor('use')} AP to throw a grenade (${fmt(apLeft(own))} left).`); scheduleSync(); return; }
       const x = +action.x, y = +action.y;
       if (!Number.isFinite(x) || !Number.isFinite(y)) { net.notify(clientId, 'Choose a target square.'); return; }
       const result = executeGrenade(own, itemName, x, y);
       if (!result.ok) { net.notify(clientId, result.reason || 'Could not throw that grenade.'); scheduleSync(); return; }
-      net.notify(clientId, `${itemName} thrown.`);
+      payAp(own, 'use');
+      net.notify(clientId, `${itemName} thrown (${apCostFor('use')} AP used).`);
       changed(); return;
     }
     case 'loot': {
@@ -4247,7 +4652,6 @@ async function handleAction(msg) {
       if (setupPhase) { net.notify(clientId, 'The GM is still setting up the mission.'); return; }
       if (isDown(own)) { net.notify(clientId, 'Your character is down.'); return; }
       if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
-      if (settings.turnBased && turn.attacked && turn.attacked[own.id]) { net.notify(clientId, 'You have already attacked this turn.'); scheduleSync(); return; }
       const source = { kind: String(action.sourceKind || ''), id: action.sourceId };
       const result = performLoot(own, source);
       if (result.error) { net.notify(clientId, result.error); scheduleSync(); return; }
@@ -4260,18 +4664,19 @@ async function handleAction(msg) {
       const target = tokenById(+action.targetId);
       if (!target || target.layer !== 'gm') { net.notify(clientId, 'Choose a hostile target.'); return; }
       if (!MOVE_LABEL[action.move]) { net.notify(clientId, 'Choose Strike, Grapple or Counter.'); return; }
-      if (pendingAttackFor(own.id)) { net.notify(clientId, 'Your attack is already waiting for the GM.'); scheduleSync(); return; }
       if (settings.turnBased && turn.activeId !== own.id) { net.notify(clientId, 'It is not your turn yet.'); scheduleSync(); return; }
-      if (settings.turnBased && turn.attacked && turn.attacked[own.id]) { net.notify(clientId, 'You have already attacked this turn.'); scheduleSync(); return; }
+      const shot = weaponOf(own).type === 'ranged' ? (action.shot === 'snap' ? 'snap' : 'aimed') : 'melee';
+      const cost = apCostFor(shot);
+      if (usesAp(own) && !canPayAp(own, shot)) { net.notify(clientId, `You need ${cost} AP for a ${AP_LABEL[shot]} (${fmt(apLeft(own))} left).`); scheduleSync(); return; }
       if (!combatReach(own, target).ok) { net.notify(clientId, own.name + ' is out of reach with a ' + weaponOf(own).label + '.'); scheduleSync(); return; }
+      if (usesAp(own)) payAp(own, shot);
       const id = 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       pendingPlayerAttacks.set(id, {
         id, clientId, attackerId: own.id, targetId: target.id,
-        move: action.move, reaction: 'auto', queuedAt: Date.now()
+        move: action.move, shot, cost: usesAp(own) ? cost : 0, reaction: 'auto', queuedAt: Date.now()
       });
-      if (settings.turnBased) { turn.attacked = turn.attacked || {}; turn.attacked[own.id] = true; }
-      logEvent(`${own.name} requests an attack on ${target.name} with ${MOVE_LABEL[action.move]}. Waiting for the GM to set the hostile stance.`);
-      net.notify(clientId, 'Attack queued. The GM will set the hostile stance or result and resolve it.');
+      logEvent(`${own.name} requests a ${AP_LABEL[shot].toLowerCase()} on ${target.name} with ${MOVE_LABEL[action.move]} (${cost} AP). Waiting for the GM to set the hostile stance.`);
+      net.notify(clientId, `${AP_LABEL[shot]} queued · ${cost} AP. The GM will resolve it when the hostile stance is set.`);
       changed(); return;
     }
     case 'endTurn': {

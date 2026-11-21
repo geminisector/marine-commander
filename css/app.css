@@ -85,7 +85,7 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;margin:0}
   border:1px solid var(--line);border-radius:6px;background:rgba(18,25,35,.94);padding:5px 9px;
   pointer-events:none;font:600 12px/1 var(--f-head);z-index:2}
 .aphud b{font:600 9px/1 var(--f-mono);letter-spacing:.14em;color:var(--accent)}
-.aphud .apnum{font:600 16px/1 var(--f-head);min-width:1.2em;text-align:right}
+.aphud .apnum{font:600 16px/1 var(--f-head);min-width:3.2em;text-align:right}
 .aphud .apbar{width:46px;height:5px;border-radius:999px;background:var(--surface-2);overflow:hidden}
 .aphud .apbar i{display:block;height:100%;width:100%;background:var(--accent)}
 .aphud[data-turn=true]{border-color:var(--accent);box-shadow:0 0 0 1px rgba(242,169,59,.22)}
@@ -184,6 +184,7 @@ body{min-height:100dvh}
 .apmeter b{font:600 10px/1 var(--f-mono);letter-spacing:.14em;color:var(--accent)}
 .apmeter span{font:600 16px/1 var(--f-head)}
 .apmeter.empty span{color:var(--gm)}
+.apcosts{font-size:10px;line-height:1.45;color:var(--muted)}
 .invbox{display:grid;gap:5px;padding:5px 4px 3px 34px}
 .invbox .invhead{display:flex;align-items:center;justify-content:space-between;gap:6px;
   font:600 9px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
