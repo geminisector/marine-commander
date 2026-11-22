@@ -276,6 +276,40 @@ d['image'] = 'newmap.png'
 json.dump(d, open('assets/maps/newmap.scene.json', 'w'), separators=(',', ':'))
 ```
 
+#### Adding a map to a live session
+
+Only the host/GM can add a map to a live session. Players cannot upload a map
+or change the map themselves; they follow the host's selection.
+
+1. Put `newmap.dd2vtt` in `assets/maps/`.
+2. Extract its image and geometry into `assets/maps/newmap.png` and
+   `assets/maps/newmap.scene.json` with the snippet above. The app loads this
+   extracted pair, not the `.dd2vtt`, so map data stays out of live snapshots.
+3. Register the scene in the `maps` array in [`js/config.js`](js/config.js):
+
+    ```js
+    {
+      id: 'newmap',
+      name: 'New map',
+      scene: 'assets/maps/newmap.scene.json',
+      ppg: 32
+    }
+    ```
+
+   Add `group`/`level` for multi-deck maps and `stairs` entries to link decks,
+   as described above.
+4. Deploy the updated `js/config.js`, scene and image files, then reload the
+   table. Every client must be able to fetch the same scene and image; the
+   host's local files are not sent to players.
+
+If you are updating an existing map, update its `.scene.json` as well — the map
+picker never reads the `.dd2vtt` source. Preserve scene-only additions such as
+manually placed lights if you regenerate it.
+
+For a one-off custom map without changing the site, use **Solo GM → Load
+.dd2vtt**. That map stays local to that browser and cannot be shared with a
+live table.
+
 ### The Cortez boarding party
 
 The built-in scene starts with the four heroes below, any imported CombatBot
@@ -334,6 +368,11 @@ storage keys.
    the door or switch the light. Use items, heal yourself or an adjacent
    character with a Medkit, and edit your own HP from **Your character**; only
    the GM can add new inventory items. The table log has chat.
+
+Players cannot add or switch maps during a live session; the host controls the
+map and everyone follows. To use a custom map locally, open **Solo GM → Load
+.dd2vtt**. Hosts can add a map for the whole table by following [Adding a map
+to a live session](#adding-a-map-to-a-live-session).
 
 ### Importing CombatBot characters
 
@@ -468,8 +507,10 @@ from the image bytes.
 
 - Live sessions require the GM's tab to stay open. If it closes, players see
   **GM offline** and the table pauses until the GM resumes/reopens.
-- Custom `.dd2vtt` maps are solo-only. Live sessions use the built-in maps in
-  `js/config.js` so every client can load the same scene.
+- Custom `.dd2vtt` maps are solo-only; players cannot add maps to a live
+  session. Live sessions use the maps registered in `js/config.js` so every
+  client can load the same scene (see [Adding a map to a live
+  session](#adding-a-map-to-a-live-session)).
 - The session code is the access boundary. Anyone with it can join the lobby,
   and a malicious participant could spam actions (the host rate-limits them).
   Use a private broker if you need stronger isolation.
