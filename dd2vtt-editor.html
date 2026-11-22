@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>DD2VTT Editor · Marine Commander</title>
+<meta name="description" content="Edit DD2VTT battlemap files: walls, object edges, portals and lights.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="kicker">Marine Commander</span>
+      <h1>DD2VTT Editor</h1>
+    </div>
+    <a class="btn" href="index.html">← Back to splash</a>
+  </header>
+
+  <div id="toolbar">
+    <button id="btnOpen">Open…</button>
+    <button id="btnSave" disabled>Save .dd2vtt</button>
+    <input type="file" id="file" accept=".dd2vtt,.df2vtt,.uvtt,.json" hidden>
+    <span class="sep"></span>
+    <button data-tool="select" title="V">Select</button>
+    <button data-tool="wall" title="W"><span class="swatch" style="background:var(--wall)"></span>Wall</button>
+    <button data-tool="obj" title="O"><span class="swatch" style="background:var(--obj)"></span>Object edge</button>
+    <button data-tool="portal" title="D"><span class="swatch" style="background:var(--portal)"></span>Portal</button>
+    <button data-tool="light" title="L"><span class="swatch" style="background:var(--light)"></span>Light</button>
+    <span class="sep"></span>
+    <button id="btnUndo" disabled title="Ctrl+Z">Undo</button>
+    <button id="btnRedo" disabled title="Ctrl+Y">Redo</button>
+    <span class="sep"></span>
+    <select id="snapMode" title="Snapping">
+      <option value="grid">Snap: grid</option>
+      <option value="half" selected>Snap: half grid</option>
+      <option value="quarter">Snap: quarter grid</option>
+      <option value="off">Snap: off</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="snapPts" checked> Snap to points</label>
+    <label class="chk"><input type="checkbox" id="showGrid" checked> Grid</label>
+    <label class="chk"><input type="checkbox" id="showLights" checked> Light radius</label>
+    <label class="chk"><input type="checkbox" id="showImg" checked> Image</label>
+    <button id="btnFit">Fit</button>
+  </div>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="empty"><b>No map loaded</b><span>Open a .dd2vtt file, or drag &amp; drop one here.</span><button id="btnOpen2">Open…</button></div>
+    <div id="drop"></div>
+    <div id="toast"></div>
+  </div>
+
+  <div id="panel"></div>
+
+  <div id="status"><span class="hint" id="hint"></span><span id="coords"></span></div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+/* ---------- state ---------- */
+let doc = null;             // parsed dd2vtt minus the image
+let imageB64 = "";          // base64 image string, kept untouched for saving
+let img = null;             // HTMLImageElement
+let fileName = "map.dd2vtt";
+let view = {x:0, y:0, s:1};
+let tool = "select";
+let sel = null;             // {kind:'wall'|'obj'|'portal'|'light', i, p?}
+let draft = null;           // {kind, pts:[{x,y}]}
+let hoverG = null;          // snapped grid coords under cursor
+let drag = null;
+let undoS = [], redoS = [];
+let spaceDown = false;
+
+const ARR = {wall:"line_of_sight", obj:"objects_line_of_sight"};
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const COL = {
+  wall: cssVar("--ed-wall"), obj: cssVar("--ed-obj"), portal: cssVar("--ed-portal"),
+  portalOpen: cssVar("--ed-portal-open"), light: cssVar("--ed-light"), stage: cssVar("--stage")
+};
+const HINTS = {
+  select:"Click to select · drag points/items to move · double-click a segment to add a point · Delete removes the selected item",
+  wall:"Click to add points · Enter or double-click to finish · click the first point to close a loop · Esc cancels · Alt disables snapping",
+  obj:"Same as Wall, but draws object line-of-sight edges (blocks sight only when the VTT supports it)",
+  portal:"Click both ends of the door/window · toggle open/closed in the side panel",
+  light:"Click to place a light · adjust range/colour in the side panel"
+};
+
+/* ---------- helpers ---------- */
+const ppg = () => doc.resolution.pixels_per_grid;
+const toS = g => ({x: view.x + g.x*ppg()*view.s, y: view.y + g.y*ppg()*view.s});
+const toG = (sx,sy) => ({x:(sx-view.x)/(ppg()*view.s), y:(sy-view.y)/(ppg()*view.s)});
+const d2 = (a,b) => (a.x-b.x)**2 + (a.y-b.y)**2;
+const clone = o => JSON.parse(JSON.stringify(o));
+const rnd = n => Math.round(n*10000)/10000;
+
+function distSeg(p,a,b){
+  const dx=b.x-a.x, dy=b.y-a.y, L=dx*dx+dy*dy;
+  let t = L ? ((p.x-a.x)*dx+(p.y-a.y)*dy)/L : 0;
+  t = Math.max(0,Math.min(1,t));
+  const q={x:a.x+t*dx,y:a.y+t*dy};
+  return {d:Math.sqrt(d2(p,q)), t, q};
+}
+function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),2600)}
+
+function hexToInput(h){ h=(h||"ffffffff").replace("#",""); return "#"+(h.length>=8?h.slice(2,8):h.padStart(6,"f").slice(-6)); }
+function inputToHex(c,old){ old=(old||"").replace("#",""); return (old.length===8?old.slice(0,2):"ff")+c.replace("#","").toLowerCase(); }
+function cssRGBA(h,a){ h=(h||"ffffffff").replace("#",""); const c=h.length>=8?h.slice(2,8):h.padStart(6,"f").slice(-6);
+  return `rgba(${parseInt(c.slice(0,2),16)},${parseInt(c.slice(2,4),16)},${parseInt(c.slice(4,6),16)},${a})`; }
+
+/* ---------- history ---------- */
+function snapshot(){ if(!doc)return; undoS.push(JSON.stringify(doc)); if(undoS.length>150)undoS.shift(); redoS=[]; syncButtons(); }
+function undo(){ if(!undoS.length)return; redoS.push(JSON.stringify(doc)); doc=JSON.parse(undoS.pop()); sel=null; draft=null; afterChange(); }
+function redo(){ if(!redoS.length)return; undoS.push(JSON.stringify(doc)); doc=JSON.parse(redoS.pop()); sel=null; draft=null; afterChange(); }
+function afterChange(){ syncButtons(); updatePanel(); draw(); }
+function syncButtons(){
+  $("btnUndo").disabled=!undoS.length; $("btnRedo").disabled=!redoS.length; $("btnSave").disabled=!doc;
+}
+
+/* ---------- file I/O ---------- */
+function sniffMime(b64){ if(b64.startsWith("/9j/"))return "image/jpeg"; if(b64.startsWith("UklG"))return "image/webp"; return "image/png"; }
+
+function loadText(text, name){
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ toast("Not a valid JSON/dd2vtt file"); return; }
+  if(!data || !data.resolution || !data.resolution.pixels_per_grid){ toast("Missing resolution data – not a dd2vtt file?"); return; }
+  imageB64 = data.image || ""; delete data.image;
+  data.resolution.map_origin = data.resolution.map_origin || {x:0,y:0};
+  data.line_of_sight = data.line_of_sight || [];
+  data.objects_line_of_sight = data.objects_line_of_sight || [];
+  data.portals = data.portals || [];
+  data.lights = data.lights || [];
+  data.environment = data.environment || {};
+  if(data.environment.ambient_light===undefined) data.environment.ambient_light = "ffffffff";
+  if(data.environment.baked_lighting===undefined) data.environment.baked_lighting = false;
+  doc = data; fileName = name || "map.dd2vtt"; sel=null; draft=null; undoS=[]; redoS=[];
+  img = null;
+  if(imageB64){
+    const im = new Image();
+    im.onload = () => { img = im;
+      if(!doc.resolution.map_size) doc.resolution.map_size = {x: im.naturalWidth/ppg(), y: im.naturalHeight/ppg()};
+      fit(); draw(); };
+    im.onerror = () => toast("Could not decode embedded image");
+    im.src = "data:"+sniffMime(imageB64)+";base64,"+imageB64;
+  }
+  if(!doc.resolution.map_size) doc.resolution.map_size = {x:20,y:20};
+  $("empty").style.display = "none";
+  fit(); afterChange();
+  toast(`Loaded ${fileName}: ${doc.line_of_sight.length} walls, ${doc.portals.length} portals, ${doc.lights.length} lights`);
+}
+
+function openFile(f){ if(!f)return; f.text().then(t=>loadText(t,f.name)); }
+
+function save(){
+  if(!doc)return;
+  const out = Object.assign({}, doc, {image: imageB64});
+  const blob = new Blob([JSON.stringify(out)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName.replace(/\.(dd2vtt|df2vtt|uvtt|json)$/i,"") + ".dd2vtt";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  toast("Saved "+a.download);
+}
+
+/* ---------- canvas ---------- */
+const cv = $("cv"), ctx = cv.getContext("2d");
+let dirty = false;
+function draw(){ if(dirty)return; dirty=true; requestAnimationFrame(render); }
+function resize(){
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
+  cv.width = Math.max(1,Math.round(r.width*dpr)); cv.height = Math.max(1,Math.round(r.height*dpr));
+  draw();
+}
+function fit(){
+  if(!doc)return;
+  const r = cv.getBoundingClientRect(), o = doc.resolution.map_origin, sz = doc.resolution.map_size;
+  const w = sz.x*ppg(), h = sz.y*ppg();
+  view.s = Math.min((r.width-40)/w, (r.height-40)/h);
+  if(!isFinite(view.s)||view.s<=0) view.s=1;
+  view.x = (r.width - w*view.s)/2 - o.x*ppg()*view.s;
+  view.y = (r.height - h*view.s)/2 - o.y*ppg()*view.s;
+  draw();
+}
+
+function render(){
+  dirty=false;
+  const dpr = window.devicePixelRatio||1, W = cv.width/dpr, H = cv.height/dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  if(!doc) return;
+  const P = ppg(), o = doc.resolution.map_origin, sz = doc.resolution.map_size;
+
+  // image
+  const ox = view.x + o.x*P*view.s, oy = view.y + o.y*P*view.s, ow = sz.x*P*view.s, oh = sz.y*P*view.s;
+  if(img && $("showImg").checked) ctx.drawImage(img, ox, oy, ow, oh);
+  else { ctx.fillStyle=COL.stage; ctx.fillRect(ox,oy,ow,oh); }
+
+  // grid
+  if($("showGrid").checked){
+    ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=1; ctx.beginPath();
+    const step = P*view.s;
+    if(step>5){
+      for(let gx=0; gx<=sz.x+1e-6; gx++){ const x=Math.round(ox+gx*step)+.5; ctx.moveTo(x,oy); ctx.lineTo(x,oy+oh); }
+      for(let gy=0; gy<=sz.y+1e-6; gy++){ const y=Math.round(oy+gy*step)+.5; ctx.moveTo(ox,y); ctx.lineTo(ox+ow,y); }
+    }
+    ctx.stroke();
+  }
+  ctx.strokeStyle="rgba(255,255,255,.5)"; ctx.lineWidth=1; ctx.strokeRect(ox+.5,oy+.5,ow,oh);
+
+  // light radii
+  if($("showLights").checked){
+    for(const l of doc.lights){
+      const c = toS(l.position), r = (l.range||0)*P*view.s;
+      if(r<=0) continue;
+      const g = ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,r);
+      g.addColorStop(0, cssRGBA(l.color,.35*Math.min(1,l.intensity??1)));
+      g.addColorStop(1, cssRGBA(l.color,0));
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(c.x,c.y,r,0,Math.PI*2); ctx.fill();
+    }
+  }
+
+  // polylines
+  for(const kind of ["obj","wall"]){
+    const color = kind==="wall" ? COL.wall : COL.obj;
+    doc[ARR[kind]].forEach((pts,i)=>{
+      const isSel = sel && sel.kind===kind && sel.i===i;
+      ctx.strokeStyle = color; ctx.lineWidth = isSel?3.5:2; ctx.lineJoin="round";
+      if(kind==="obj") ctx.setLineDash([7,4]); else ctx.setLineDash([]);
+      ctx.beginPath(); pts.forEach((g,k)=>{const s=toS(g); k?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);}); ctx.stroke();
+      ctx.setLineDash([]);
+      pts.forEach((g,k)=>{
+        const s=toS(g), big = isSel, picked = isSel && sel.p===k;
+        const r = picked?6:(big?4.5:2.5);
+        ctx.fillStyle = picked ? "#fff" : (big ? "#fff8" : color);
+        ctx.strokeStyle = "#000a"; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.rect(s.x-r,s.y-r,r*2,r*2); ctx.fill(); if(big)ctx.stroke();
+      });
+    });
+  }
+
+  // portals
+  doc.portals.forEach((p,i)=>{
+    const a=toS(p.bounds[0]), b=toS(p.bounds[1]), isSel = sel&&sel.kind==="portal"&&sel.i===i;
+    ctx.strokeStyle = p.closed ? COL.portal : COL.portalOpen;
+    ctx.lineWidth = isSel?8:6; ctx.lineCap="butt";
+    ctx.globalAlpha = .85; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.globalAlpha=1;
+    if(isSel){ ctx.strokeStyle="#fff"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      [a,b].forEach((s,k)=>{ctx.fillStyle = sel.p===k?"#fff":"#fff8"; ctx.fillRect(s.x-4.5,s.y-4.5,9,9);}); }
+  });
+
+  // light markers
+  doc.lights.forEach((l,i)=>{
+    const c=toS(l.position), isSel = sel&&sel.kind==="light"&&sel.i===i;
+    ctx.fillStyle = cssRGBA(l.color,1); ctx.strokeStyle = isSel?"#fff":"#000"; ctx.lineWidth=isSel?2.5:1.5;
+    ctx.beginPath(); ctx.arc(c.x,c.y,7,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle="#000a"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(c.x,c.y,2,0,Math.PI*2); ctx.stroke();
+  });
+
+  // draft
+  if(draft){
+    const color = draft.kind==="wall"?COL.wall:draft.kind==="obj"?COL.obj:COL.portal;
+    ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.setLineDash([6,4]);
+    ctx.beginPath();
+    draft.pts.forEach((g,k)=>{const s=toS(g); k?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+    if(hoverG){ const s=toS(hoverG); ctx.lineTo(s.x,s.y); }
+    ctx.stroke(); ctx.setLineDash([]);
+    draft.pts.forEach(g=>{const s=toS(g); ctx.fillStyle="#fff"; ctx.fillRect(s.x-3.5,s.y-3.5,7,7);});
+  }
+  // cursor marker
+  if(hoverG && tool!=="select" && !spaceDown){
+    const s=toS(hoverG); ctx.strokeStyle="#fff"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(s.x-8,s.y); ctx.lineTo(s.x+8,s.y); ctx.moveTo(s.x,s.y-8); ctx.lineTo(s.x,s.y+8); ctx.stroke();
+  }
+}
+
+/* ---------- snapping & hit-testing ---------- */
+function allPoints(skip){
+  const out=[];
+  for(const kind of ["wall","obj"]) doc[ARR[kind]].forEach((pts,i)=>{
+    if(skip && skip.kind===kind && skip.i===i && skip.whole) return;
+    pts.forEach((g,p)=>{ if(skip && skip.kind===kind && skip.i===i && skip.p===p) return; out.push(g); });
+  });
+  doc.portals.forEach((po,i)=>po.bounds.forEach((g,p)=>{ if(skip&&skip.kind==="portal"&&skip.i===i&&(skip.whole||skip.p===p))return; out.push(g); }));
+  return out;
+}
+function snapG(g, alt, skip){
+  if(alt) return g;
+  if($("snapPts").checked){
+    const s0 = toS(g); let best=null, bd=100;
+    for(const q of allPoints(skip)){ const dd=d2(toS(q),s0); if(dd<bd){bd=dd;best=q;} }
+    if(best) return {x:best.x,y:best.y};
+  }
+  const m = $("snapMode").value;
+  const n = m==="grid"?1 : m==="half"?2 : m==="quarter"?4 : 0;
+  if(!n) return g;
+  return {x:Math.round(g.x*n)/n, y:Math.round(g.y*n)/n};
+}
+
+function hitTest(sx,sy){
+  const m={x:sx,y:sy};
+  for(let i=doc.lights.length-1;i>=0;i--) if(d2(toS(doc.lights[i].position),m)<=121) return {kind:"light",i};
+  for(let i=doc.portals.length-1;i>=0;i--){
+    const b=doc.portals[i].bounds.map(toS);
+    for(let p=0;p<2;p++) if(d2(b[p],m)<=64) return {kind:"portal",i,p};
+    if(distSeg(m,b[0],b[1]).d<=8) return {kind:"portal",i};
+  }
+  for(const kind of ["wall","obj"]){
+    const A=doc[ARR[kind]];
+    for(let i=A.length-1;i>=0;i--) for(let p=0;p<A[i].length;p++) if(d2(toS(A[i][p]),m)<=64) return {kind,i,p};
+  }
+  for(const kind of ["wall","obj"]){
+    const A=doc[ARR[kind]];
+    for(let i=A.length-1;i>=0;i--) for(let k=0;k<A[i].length-1;k++){
+      const r=distSeg(m,toS(A[i][k]),toS(A[i][k+1]));
+      if(r.d<=6) return {kind,i,seg:k};
+    }
+  }
+  return null;
+}
+
+/* ---------- item operations ---------- */
+function itemOf(s){ return s.kind==="portal"?doc.portals[s.i] : s.kind==="light"?doc.lights[s.i] : doc[ARR[s.kind]][s.i]; }
+function deleteSel(){
+  if(!sel) return; snapshot();
+  if(sel.kind==="portal") doc.portals.splice(sel.i,1);
+  else if(sel.kind==="light") doc.lights.splice(sel.i,1);
+  else doc[ARR[sel.kind]].splice(sel.i,1);
+  sel=null; afterChange();
+}
+function deletePoint(){
+  if(!sel||sel.p===undefined||(sel.kind!=="wall"&&sel.kind!=="obj")) return;
+  const pts=itemOf(sel);
+  if(pts.length<=2){ deleteSel(); return; }
+  snapshot(); pts.splice(sel.p,1); sel={kind:sel.kind,i:sel.i}; afterChange();
+}
+function portalMid(po){ po.position={x:rnd((po.bounds[0].x+po.bounds[1].x)/2), y:rnd((po.bounds[0].y+po.bounds[1].y)/2)}; }
+
+function commitDraft(){
+  if(!draft) return;
+  if(draft.kind==="wall"||draft.kind==="obj"){
+    if(draft.pts.length>=2){
+      snapshot(); const A=doc[ARR[draft.kind]]; A.push(draft.pts.map(p=>({x:rnd(p.x),y:rnd(p.y)})));
+      sel={kind:draft.kind,i:A.length-1};
+    }
+  }
+  draft=null; afterChange();
+}
+
+/* ---------- pointer interaction ---------- */
+function evPos(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; }
+
+cv.addEventListener("contextmenu", e=>e.preventDefault());
+cv.addEventListener("pointerdown", e=>{
+  if(!doc) return;
+  cv.setPointerCapture(e.pointerId);
+  const m=evPos(e);
+  if(e.button===1||e.button===2||spaceDown){
+    drag={type:"pan", sx:m.x, sy:m.y, vx:view.x, vy:view.y}; return;
+  }
+  if(e.button!==0) return;
+  const g=toG(m.x,m.y);
+
+  if(tool==="select"){
+    const h=hitTest(m.x,m.y);
+    sel = h ? {kind:h.kind,i:h.i,p:h.p} : null;
+    if(h){
+      const item=itemOf(h);
+      if(h.p!==undefined && h.kind!=="light") drag={type:"vertex", kind:h.kind, i:h.i, p:h.p, moved:false};
+      else drag={type:"move", kind:h.kind, i:h.i, start:snapG(g,e.altKey,{kind:h.kind,i:h.i,whole:true}), orig:clone(item), moved:false};
+    }
+    updatePanel(); draw(); return;
+  }
+
+  const sg = snapG(g, e.altKey);
+  if(tool==="wall"||tool==="obj"){
+    if(!draft){ draft={kind:tool,pts:[sg]}; }
+    else{
+      const first=draft.pts[0], last=draft.pts[draft.pts.length-1];
+      if(draft.pts.length>=3 && d2(toS(first),m)<100){ draft.pts.push({x:first.x,y:first.y}); commitDraft(); return; }
+      if(d2(toS(last),toS(sg))>9) draft.pts.push(sg);
+    }
+    draw();
+  } else if(tool==="portal"){
+    if(!draft){ draft={kind:"portal",pts:[sg]}; }
+    else{
+      const a=draft.pts[0];
+      if(d2(toS(a),toS(sg))<16){ draft=null; draw(); return; }
+      snapshot();
+      const po={position:{x:0,y:0}, bounds:[{x:rnd(a.x),y:rnd(a.y)},{x:rnd(sg.x),y:rnd(sg.y)}],
+        rotation:rnd(Math.atan2(sg.y-a.y, sg.x-a.x)), closed:true, freestanding:false};
+      portalMid(po); doc.portals.push(po); sel={kind:"portal",i:doc.portals.length-1}; draft=null; afterChange();
+    }
+    draw();
+  } else if(tool==="light"){
+    snapshot();
+    doc.lights.push({position:{x:rnd(sg.x),y:rnd(sg.y)}, range:4, intensity:1, color:"ffffffff", shadows:true});
+    sel={kind:"light",i:doc.lights.length-1}; afterChange();
+  }
+});
+
+cv.addEventListener("pointermove", e=>{
+  if(!doc) return;
+  const m=evPos(e), g=toG(m.x,m.y);
+  let skip=null;
+  if(drag && drag.type==="vertex") skip={kind:drag.kind,i:drag.i,p:drag.p};
+  if(drag && drag.type==="move") skip={kind:drag.kind,i:drag.i,whole:true};
+  hoverG = snapG(g, e.altKey, skip);
+  $("coords").textContent = `x ${g.x.toFixed(2)}  y ${g.y.toFixed(2)}`;
+
+  if(drag){
+    if(drag.type==="pan"){ view.x=drag.vx+(m.x-drag.sx); view.y=drag.vy+(m.y-drag.sy); }
+    else{
+      if(!drag.moved){ snapshot(); drag.moved=true; }
+      if(drag.type==="vertex"){
+        const pt={x:rnd(hoverG.x),y:rnd(hoverG.y)};
+        if(drag.kind==="portal"){ const po=doc.portals[drag.i]; po.bounds[drag.p]=pt; portalMid(po); }
+        else doc[ARR[drag.kind]][drag.i][drag.p]=pt;
+      } else {
+        const dx=hoverG.x-drag.start.x, dy=hoverG.y-drag.start.y, o=drag.orig;
+        if(drag.kind==="light") doc.lights[drag.i].position={x:rnd(o.position.x+dx),y:rnd(o.position.y+dy)};
+        else if(drag.kind==="portal"){
+          const po=doc.portals[drag.i];
+          po.bounds=o.bounds.map(b=>({x:rnd(b.x+dx),y:rnd(b.y+dy)})); portalMid(po);
+        } else doc[ARR[drag.kind]][drag.i]=o.map(b=>({x:rnd(b.x+dx),y:rnd(b.y+dy)}));
+      }
+    }
+  }
+  draw();
+});
+cv.addEventListener("pointerup", ()=>{ if(drag&&drag.moved) updatePanel(); drag=null; });
+cv.addEventListener("pointerleave", ()=>{ hoverG=null; draw(); });
+
+cv.addEventListener("dblclick", e=>{
+  if(!doc) return;
+  if(draft && (draft.kind==="wall"||draft.kind==="obj")){ commitDraft(); return; }
+  if(tool!=="select") return;
+  const m=evPos(e), h=hitTest(m.x,m.y);
+  if(h && (h.kind==="wall"||h.kind==="obj") && h.seg!==undefined){
+    const pts=doc[ARR[h.kind]][h.i], r=distSeg(m,toS(pts[h.seg]),toS(pts[h.seg+1]));
+    const g=toG(r.q.x,r.q.y), ng=snapG(g,e.altKey,{kind:h.kind,i:h.i,whole:true});
+    snapshot(); pts.splice(h.seg+1,0,{x:rnd(ng.x),y:rnd(ng.y)});
+    sel={kind:h.kind,i:h.i,p:h.seg+1}; afterChange();
+  }
+});
+
+cv.addEventListener("wheel", e=>{
+  if(!doc) return; e.preventDefault();
+  const m=evPos(e), f=Math.exp(-e.deltaY*0.0015), ns=Math.max(0.02,Math.min(40,view.s*f));
+  view.x = m.x-(m.x-view.x)*(ns/view.s); view.y = m.y-(m.y-view.y)*(ns/view.s); view.s=ns; draw();
+},{passive:false});
+
+/* ---------- keyboard ---------- */
+function setTool(t){
+  tool=t; draft=null;
+  document.querySelectorAll("[data-tool]").forEach(b=>b.classList.toggle("active",b.dataset.tool===t));
+  $("hint").textContent = HINTS[t]; cv.style.cursor = t==="select"?"default":"crosshair"; draw();
+}
+window.addEventListener("keydown", e=>{
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName) && document.activeElement.type!=="checkbox" && document.activeElement.type!=="color";
+  if(e.key===" " && !typing){ spaceDown=true; cv.style.cursor="grab"; e.preventDefault(); }
+  const mod=e.ctrlKey||e.metaKey;
+  if(mod && e.key.toLowerCase()==="z"){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
+  if(mod && e.key.toLowerCase()==="y"){ e.preventDefault(); redo(); return; }
+  if(mod && e.key.toLowerCase()==="s"){ e.preventDefault(); save(); return; }
+  if(typing || mod) return;
+  const k=e.key.toLowerCase();
+  if(k==="v") setTool("select"); else if(k==="w") setTool("wall"); else if(k==="o") setTool("obj");
+  else if(k==="d") setTool("portal"); else if(k==="l") setTool("light"); else if(k==="f") fit();
+  else if(e.key==="Enter") commitDraft();
+  else if(e.key==="Escape"){ if(draft){draft=null;draw();} else {sel=null;updatePanel();draw();} }
+  else if(e.key==="Delete"){ deleteSel(); }
+  else if(e.key==="Backspace"){ e.preventDefault(); deletePoint(); }
+});
+window.addEventListener("keyup", e=>{ if(e.key===" "){ spaceDown=false; setTool(tool); } });
+
+/* ---------- side panel ---------- */
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function num(id,label,val,step){return `<div class="row"><span>${label}</span><input type="number" id="${id}" step="${step||0.1}" value="${rnd(val)}"></div>`}
+
+function updatePanel(){
+  const P=$("panel");
+  if(!doc){ P.innerHTML='<p class="muted">Open a .dd2vtt file to begin.</p>'; return; }
+  const r=doc.resolution, env=doc.environment;
+  let h=`<h3>Map</h3>
+    <div class="muted">${esc(fileName)}<br>${r.map_size.x}×${r.map_size.y} squares · ${r.pixels_per_grid} px/square<br>
+    ${doc.line_of_sight.length} walls · ${doc.objects_line_of_sight.length} object edges<br>${doc.portals.length} portals · ${doc.lights.length} lights</div>
+    <h3>Environment</h3>
+    <div class="row"><span>Ambient</span><input type="color" id="amb" value="${hexToInput(env.ambient_light)}"></div>
+    <label class="chk"><input type="checkbox" id="baked" ${env.baked_lighting?"checked":""}> Baked lighting</label>`;
+
+  if(sel){
+    const it=itemOf(sel);
+    if(sel.kind==="wall"||sel.kind==="obj"){
+      const closed = it.length>2 && it[0].x===it[it.length-1].x && it[0].y===it[it.length-1].y;
+      h+=`<h3>${sel.kind==="wall"?"Wall":"Object edge"} #${sel.i+1}</h3><div class="muted">${it.length} points${closed?" · closed loop":""}</div>`;
+      if(sel.p!==undefined){
+        h+=`<h3>Point ${sel.p+1}</h3>${num("px","X",it[sel.p].x,0.05)}${num("py","Y",it[sel.p].y,0.05)}`;
+      }
+      h+=`<div class="btns">
+        ${sel.p!==undefined?'<button id="bDelPt" class="danger">Delete point</button>':""}
+        ${!closed&&it.length>=3?'<button id="bClose">Close loop</button>':""}
+        <button id="bSwap">Move to ${sel.kind==="wall"?"object edges":"walls"}</button>
+        <button id="bDel" class="danger">Delete ${sel.kind==="wall"?"wall":"edge"}</button></div>`;
+    } else if(sel.kind==="portal"){
+      h+=`<h3>Portal #${sel.i+1}</h3>
+        <label class="chk"><input type="checkbox" id="pClosed" ${it.closed?"checked":""}> Closed</label><br>
+        <label class="chk"><input type="checkbox" id="pFree" ${it.freestanding?"checked":""}> Freestanding</label>
+        ${num("pRot","Rotation °",it.rotation*180/Math.PI,1)}
+        <div class="btns"><button id="bDel" class="danger">Delete portal</button></div>`;
+    } else if(sel.kind==="light"){
+      h+=`<h3>Light #${sel.i+1}</h3>
+        ${num("lRange","Range (sq)",it.range,0.5)}${num("lInt","Intensity",it.intensity,0.1)}
+        <div class="row"><span>Colour</span><input type="color" id="lCol" value="${hexToInput(it.color)}"></div>
+        <label class="chk"><input type="checkbox" id="lSh" ${it.shadows?"checked":""}> Cast shadows</label>
+        ${num("lx","X",it.position.x,0.05)}${num("ly","Y",it.position.y,0.05)}
+        <div class="btns"><button id="bDel" class="danger">Delete light</button></div>`;
+    }
+  } else {
+    h+=`<h3>Selection</h3><div class="muted">Nothing selected.</div>`;
+  }
+  h+=`<h3>Shortcuts</h3><div class="muted"><kbd>V</kbd> select <kbd>W</kbd> wall <kbd>O</kbd> object <kbd>D</kbd> portal <kbd>L</kbd> light<br>
+    <kbd>Space</kbd>/right-drag pan · wheel zoom · <kbd>F</kbd> fit<br><kbd>Ctrl+Z</kbd>/<kbd>Y</kbd> undo/redo · <kbd>Ctrl+S</kbd> save<br><kbd>Backspace</kbd> delete point · <kbd>Delete</kbd> delete item</div>`;
+  P.innerHTML=h;
+
+  const on=(id,ev,fn)=>{const e=$(id); if(e) e.addEventListener(ev,fn);};
+  P.querySelectorAll("input").forEach(i=>i.addEventListener("focus",()=>{ if(!i._snap){ snapshot(); } }));
+  const bind=(id,apply)=>on(id,"input",e=>{apply(e.target); draw();});
+  on("amb","input",e=>{env.ambient_light=inputToHex(e.target.value,env.ambient_light); draw();});
+  on("baked","change",e=>{env.baked_lighting=e.target.checked;});
+  if(sel){
+    const it=itemOf(sel);
+    on("bDel","click",deleteSel); on("bDelPt","click",deletePoint);
+    on("bClose","click",()=>{snapshot(); it.push({x:it[0].x,y:it[0].y}); afterChange();});
+    on("bSwap","click",()=>{ snapshot(); const from=sel.kind, to=from==="wall"?"obj":"wall";
+      const pts=doc[ARR[from]].splice(sel.i,1)[0]; doc[ARR[to]].push(pts); sel={kind:to,i:doc[ARR[to]].length-1}; afterChange(); });
+    bind("px",t=>{ if(t.value!=="") it[sel.p].x=parseFloat(t.value); });
+    bind("py",t=>{ if(t.value!=="") it[sel.p].y=parseFloat(t.value); });
+    bind("pClosed",t=>{it.closed=t.checked;}); on("pClosed","change",e=>{it.closed=e.target.checked;draw();});
+    on("pFree","change",e=>{it.freestanding=e.target.checked;});
+    bind("pRot",t=>{ if(t.value!=="") it.rotation=parseFloat(t.value)*Math.PI/180; });
+    bind("lRange",t=>{ if(t.value!=="") it.range=parseFloat(t.value); });
+    bind("lInt",t=>{ if(t.value!=="") it.intensity=parseFloat(t.value); });
+    bind("lCol",t=>{ it.color=inputToHex(t.value,it.color); });
+    on("lSh","change",e=>{it.shadows=e.target.checked;});
+    bind("lx",t=>{ if(t.value!=="") it.position.x=parseFloat(t.value); });
+    bind("ly",t=>{ if(t.value!=="") it.position.y=parseFloat(t.value); });
+  }
+}
+
+/* ---------- wiring ---------- */
+$("btnOpen").onclick=$("btnOpen2").onclick=()=>$("file").click();
+$("file").onchange=e=>{ openFile(e.target.files[0]); e.target.value=""; };
+$("btnSave").onclick=save; $("btnUndo").onclick=undo; $("btnRedo").onclick=redo; $("btnFit").onclick=fit;
+document.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+["showGrid","showLights","showImg"].forEach(id=>$(id).onchange=draw);
+
+window.addEventListener("dragover",e=>{e.preventDefault();$("drop").style.display="block";});
+window.addEventListener("dragleave",e=>{ if(e.target===document.documentElement||!e.relatedTarget) $("drop").style.display="none"; });
+window.addEventListener("drop",e=>{e.preventDefault();$("drop").style.display="none"; openFile(e.dataTransfer.files[0]);});
+window.addEventListener("resize",resize);
+window.addEventListener("beforeunload",e=>{ if(undoS.length){ e.preventDefault(); e.returnValue=""; } });
+
+setTool("select"); updatePanel(); syncButtons(); resize();
+</script>
+</body>
+</html>

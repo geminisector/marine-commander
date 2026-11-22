@@ -1,0 +1,90 @@
+/* DD2VTT editor. Loads css/app.css for the shared tokens, fonts and base controls,
+   then lays the editor out as the same framed workspace: stage left, panel right. */
+:root{
+  --ed-wall:#e5604f;
+  --ed-obj:#ffa63d;
+  --ed-portal:#6cc3ff;
+  --ed-portal-open:#58d68a;
+  --ed-light:#ffd84a;
+}
+
+#app{
+  display:grid;gap:10px;height:100%;
+  grid-template-columns:minmax(0,1fr) 320px;
+  grid-template-rows:auto auto minmax(0,1fr) auto;
+  grid-template-areas:"top top" "toolbar toolbar" "stage panel" "status status";
+}
+
+/* ---------- top bar ---------- */
+#topbar{grid-area:top;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+#topbar .brand{align-items:center}
+#topbar .kicker{color:var(--accent)}
+#topbar a.btn{text-decoration:none;white-space:nowrap}
+
+/* ---------- toolbar ---------- */
+#toolbar{grid-area:toolbar;display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+  padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+#app button,#app select,#app input[type=number]{font:inherit;color:var(--fg);background:var(--surface-2);
+  border:1px solid var(--line);border-radius:6px;padding:5px 10px;min-height:30px}
+#app button,#app select{cursor:pointer}
+#app button:hover,#app select:hover{border-color:#3a4f69}
+#app button:disabled{opacity:.45;cursor:not-allowed;border-color:var(--line)}
+#app button.active{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+#app button.danger:hover{border-color:var(--gm);color:#ffb4aa}
+#app input[type=number]{background:var(--stage);padding:3px 6px}
+#app input[type=color]{width:32px;height:26px;padding:0;border:1px solid var(--line);border-radius:5px;background:none;cursor:pointer}
+.sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
+label.chk{display:inline-flex;align-items:center;gap:5px;color:var(--muted);cursor:pointer;user-select:none;font-size:12.5px}
+label.chk:hover{color:var(--fg)}
+
+/* ---------- stage ---------- */
+#stage{grid-area:stage;position:relative;min-height:0;min-width:0;overflow:hidden;
+  background:var(--stage);border:1px solid var(--line);border-radius:8px}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;text-align:center;color:var(--muted);pointer-events:none;padding:20px}
+#empty b{font:600 18px/1.2 var(--f-head);color:var(--fg)}
+#empty button{pointer-events:auto;margin-top:4px}
+#toast{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:rgba(11,15,21,.92);
+  border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--fg);
+  opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+#toast.show{opacity:1}
+#drop{position:absolute;inset:0;border:2px dashed var(--accent);background:rgba(242,169,59,.12);display:none;pointer-events:none}
+
+/* ---------- side panel ---------- */
+#panel{grid-area:panel;min-height:0;overflow:auto;background:var(--surface);border:1px solid var(--line);
+  border-radius:8px;padding:12px 14px;scrollbar-width:thin}
+#panel h3{margin:16px 0 6px;font:600 11px/1.2 var(--f-head);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+#panel h3:first-child{margin-top:0}
+.muted{color:var(--muted)}
+.row{display:flex;align-items:center;gap:8px;margin:5px 0}
+.row>span{width:84px;color:var(--muted)}
+.row input[type=number]{width:80px}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;flex:none}
+kbd{background:var(--surface-2);border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px;font-family:var(--f-mono)}
+
+/* ---------- status ---------- */
+#status{grid-area:status;display:flex;gap:16px;align-items:center;padding:6px 10px;background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;color:var(--muted);font:12px/1.4 var(--f-mono)}
+#status .hint{flex:1;min-width:0;position:static;left:auto;bottom:auto;max-width:none;background:none;
+  border:0;border-radius:0;padding:0;color:inherit;pointer-events:auto}
+#coords{white-space:nowrap;color:var(--fg)}
+
+/* ---------- responsive ---------- */
+@media (max-width:860px){
+  body{overflow:auto}
+  #app{height:auto;min-height:100%;grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto auto auto auto auto;
+    grid-template-areas:"top" "toolbar" "stage" "panel" "status"}
+  #stage{height:46vh;min-height:240px}
+  #panel{max-height:none}
+  #status{position:sticky;bottom:0;z-index:5}
+  #topbar .brand h1{font-size:18px}
+  #status{font-size:11px;gap:10px}
+}
+@media (max-width:520px){
+  #toolbar{gap:5px;padding:7px 8px}
+  #app button,#app select,#app input[type=number]{padding:4px 8px}
+  #status .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}

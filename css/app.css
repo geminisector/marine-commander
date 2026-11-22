@@ -134,6 +134,9 @@ body{min-height:100dvh}
 .bootnote{display:flex;gap:9px;align-items:flex-start;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);
   font-size:11.5px;line-height:1.55;color:var(--muted)}
 .bootnote .dot{margin-top:5px}
+.bootlink{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;margin:14px 0 0;font-size:12.5px;color:var(--muted)}
+.bootlink a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent;transition:border-color .12s}
+.bootlink a:hover{border-bottom-color:var(--accent)}
 .dot{width:7px;height:7px;border-radius:50%;background:#55657a;flex:none;box-shadow:0 0 0 3px rgba(85,101,122,.12)}
 .dot.on{background:var(--open);box-shadow:0 0 0 3px rgba(88,214,138,.14);animation:dotpulse 2.4s infinite}
 @keyframes dotpulse{0%,100%{box-shadow:0 0 0 3px rgba(88,214,138,.12)}50%{box-shadow:0 0 0 5px rgba(88,214,138,.05)}}
