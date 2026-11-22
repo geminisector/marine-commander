@@ -223,20 +223,28 @@ const GRENADES = Object.freeze({
   'Flashbang':      { kind: 'flashbang', label: 'Flashbang',      radius: 3, turns: 3, sight: 1 },
   'Smoke grenade':  { kind: 'smoke',     label: 'Smoke',          radius: 3, turns: 5 },
   'Fire grenade':   { kind: 'fire',      label: 'Fire',           radius: 3, turns: 5, damage: 2 },
-  'Frag grenade':   { kind: 'frag',      label: 'Fragmentation',  radius: 4, damage: 5 }
+  'Frag grenade':   { kind: 'frag',      label: 'Fragmentation',  radius: 4, damage: 5 },
+  'Boron silicate grenade': { kind: 'boron', label: 'Boron silicate', radius: 3, turns: 5 }
 });
 const GRENADE_ALIASES = Object.freeze({
   'flashbang': 'Flashbang', 'flash bang': 'Flashbang', 'flash grenade': 'Flashbang',
   'smoke': 'Smoke grenade', 'smoke grenade': 'Smoke grenade',
   'fire': 'Fire grenade', 'fire grenade': 'Fire grenade', 'incendiary grenade': 'Fire grenade',
-  'frag': 'Frag grenade', 'frag grenade': 'Frag grenade', 'fragmentation grenade': 'Frag grenade'
+  'frag': 'Frag grenade', 'frag grenade': 'Frag grenade', 'fragmentation grenade': 'Frag grenade',
+  'boron': 'Boron silicate grenade', 'boron grenade': 'Boron silicate grenade',
+  'boron silicate': 'Boron silicate grenade', 'boron silicate grenade': 'Boron silicate grenade',
+  'borosilicate': 'Boron silicate grenade', 'borosilicate grenade': 'Boron silicate grenade'
 });
 function grenadeFor(name) {
   const key = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
   return GRENADES[GRENADE_ALIASES[key]] || null;
 }
 function grenadeColor(kind) {
-  return kind === 'flashbang' ? '#f5f7ff' : kind === 'smoke' ? '#a9b4c2' : kind === 'fire' ? '#ff8a3d' : '#ff5a45';
+  return kind === 'flashbang' ? '#f5f7ff'
+    : kind === 'smoke' ? '#a9b4c2'
+    : kind === 'fire' ? '#ff8a3d'
+    : kind === 'boron' ? '#8ee8ff'
+    : '#ff5a45';
 }
 function grenadeThrowRange(t) {
   const athletic = Math.max(0, Math.min(50, +((t && t.stats && t.stats.athletic) || 0)));
@@ -314,6 +322,7 @@ function computeStats(stats) {
 }
 function weaponKeyOf(t) { return t && Object.prototype.hasOwnProperty.call(WEAPONS, t.weapon) ? t.weapon : ''; }
 function weaponOf(t) { return WEAPONS[weaponKeyOf(t)] || UNARMED; }
+function isLaserWeapon(t) { return /laser/i.test(weaponKeyOf(t)); }
 function weaponLabelOf(t) { return weaponOf(t).label; }
 function tokenDamage(t) { return Math.max(1, computeStats(t.stats).damage); }
 function tokenMaxHp(t) { return computeStats(t.stats).maxHp; }
@@ -339,7 +348,11 @@ function healthPct(t) { return t.maxHp > 0 ? (t.hp * 100) / t.maxHp : 0; }
 function combatReach(a, b) {
   if (!map) return { ok: true, text: '—' };
   const w = weaponOf(a);
-  if (w.type === 'ranged') return { ok: true, text: 'Ranged · no range limit' };
+  if (w.type === 'ranged') {
+    if (!rangedLineOfSight(a, b)) return { ok: false, text: 'Ranged · wall blocks line of sight' };
+    const absorbed = isLaserWeapon(a) && laserNeutralized(a, b);
+    return { ok: true, text: 'Ranged · clear line of sight' + (absorbed ? ' · boron silicate cloud absorbs the shot' : '') };
+  }
   const d = Math.hypot(a.x - b.x, a.y - b.y) / map.ppg;
   const reach = (a.size + b.size) / 2 + 0.5;
   return { ok: d <= reach + 1e-6, text: `Melee · ${fmt(d)} sq / ${fmt(reach)} sq reach`, dist: d, reach };
@@ -380,7 +393,7 @@ function sightSquaresFor(t) {
   return blinded ? Math.min(settings.sight, 1) : settings.sight;
 }
 function cleanZone(z) {
-  if (!z || (z.kind !== 'fire' && z.kind !== 'smoke')) return null;
+  if (!z || (z.kind !== 'fire' && z.kind !== 'smoke' && z.kind !== 'boron')) return null;
   const mapKey = typeof z.mapKey === 'string' && z.mapKey ? z.mapKey : (map ? map.key : DEFAULT_MAP_ID);
   return {
     id: String(z.id || ('z' + Math.random().toString(36).slice(2))).slice(0, 40),
@@ -685,10 +698,23 @@ function rebuildBlockers() {
 function smokeZones() {
   return map ? zones.filter(z => z.kind === 'smoke' && z.mapKey === map.key) : [];
 }
+function zonePpg(mapKey) {
+  return (MAP_BY_ID.get(mapKey) || {}).ppg || (map ? map.ppg : 16);
+}
 function inSmoke(x, y, mapKey) {
   const key = mapKey || (map ? map.key : '');
-  const ppg = (MAP_BY_ID.get(key) || {}).ppg || (map ? map.ppg : 16);
+  const ppg = zonePpg(key);
   return zones.some(z => z.kind === 'smoke' && z.mapKey === key &&
+    Math.hypot(x - z.x, y - z.y) <= z.radius * ppg);
+}
+function boronZones(mapKey) {
+  const key = mapKey || (map ? map.key : '');
+  return zones.filter(z => z.kind === 'boron' && z.mapKey === key);
+}
+function inBoronCloud(x, y, mapKey) {
+  const key = mapKey || (map ? map.key : '');
+  const ppg = zonePpg(key);
+  return zones.some(z => z.kind === 'boron' && z.mapKey === key &&
     Math.hypot(x - z.x, y - z.y) <= z.radius * ppg);
 }
 function visPoly(ox, oy, R) {
@@ -976,6 +1002,30 @@ function grenadeLineOfSight(t, x, y) {
     if (segmentHitsCircle(t.x, t.y, x, y, z.x, z.y, z.radius * map.ppg)) return false;
   }
   return true;
+}
+// Projectile and laser shots only care about solid barriers: walls and closed
+// doors. Smoke and boron silicate clouds do not block ordinary ranged fire.
+function rangedLineOfSight(a, b) {
+  if (!a || !b || !map) return false;
+  const key = a.mapKey || (map ? map.key : '');
+  if ((b.mapKey || key) !== key || key !== map.key) return false;
+  for (const s of map.hard) {
+    if (segmentsIntersect(a.x, a.y, b.x, b.y, s[0], s[1], s[2], s[3])) return false;
+  }
+  return true;
+}
+// A laser is neutralised when its shooter or target is inside a boron
+// silicate cloud, or when the beam crosses the cloud on its way there.
+function laserNeutralized(shooter, target) {
+  if (!shooter || !target || !isLaserWeapon(shooter)) return false;
+  const key = shooter.mapKey || target.mapKey || (map ? map.key : '');
+  if ((target.mapKey || key) !== key) return false;
+  if (inBoronCloud(shooter.x, shooter.y, key) || inBoronCloud(target.x, target.y, key)) return true;
+  const ppg = zonePpg(key);
+  for (const z of boronZones(key)) {
+    if (segmentHitsCircle(shooter.x, shooter.y, target.x, target.y, z.x, z.y, z.radius * ppg)) return true;
+  }
+  return false;
 }
 function blockedMove(ax, ay, bx, by) {
   if (!map) return true;
@@ -1292,15 +1342,24 @@ function drawZones(kind) {
       ctx.lineWidth = Math.max(1.5, 2 / view.k); ctx.strokeStyle = 'rgba(255,145,55,.85)';
       ctx.setLineDash([5 / view.k, 4 / view.k]); ctx.stroke(); ctx.setLineDash([]);
     } else {
-      ctx.save(); ctx.globalAlpha = role === 'gm' ? 0.36 : 0.58;
+      const boron = kind === 'boron';
+      ctx.save(); ctx.globalAlpha = boron ? (role === 'gm' ? 0.28 : 0.46) : (role === 'gm' ? 0.36 : 0.58);
       const puffs = [[0, 0, .72], [-.42, -.18, .48], [.4, -.12, .5], [-.08, .38, .46], [.18, -.46, .42]];
       for (const [dx, dy, s] of puffs) {
         const cx = z.x + dx * r, cy = z.y + dy * r, rr = r * s;
         const grd = ctx.createRadialGradient(cx, cy, rr * 0.1, cx, cy, rr);
-        grd.addColorStop(0, 'rgba(205,214,224,.78)');
-        grd.addColorStop(.6, 'rgba(150,160,175,.5)');
-        grd.addColorStop(1, 'rgba(110,120,135,0)');
+        grd.addColorStop(0, boron ? 'rgba(180,246,255,.8)' : 'rgba(205,214,224,.78)');
+        grd.addColorStop(.6, boron ? 'rgba(95,205,235,.45)' : 'rgba(150,160,175,.5)');
+        grd.addColorStop(1, boron ? 'rgba(40,130,170,0)' : 'rgba(110,120,135,0)');
         ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 6.2832); ctx.fillStyle = grd; ctx.fill();
+      }
+      if (boron) {
+        ctx.globalAlpha = role === 'gm' ? 0.45 : 0.7;
+        ctx.strokeStyle = 'rgba(140,232,255,.9)';
+        ctx.lineWidth = Math.max(1, 1.5 / view.k);
+        ctx.setLineDash([4 / view.k, 5 / view.k]);
+        ctx.beginPath(); ctx.arc(z.x, z.y, r, 0, 6.2832); ctx.stroke();
+        ctx.setLineDash([]);
       }
       ctx.restore();
     }
@@ -1560,6 +1619,7 @@ function draw() {
   drawRequestHighlight();
   for (const layer of ['gm', 'player']) for (const t of tokens) if (t.layer === layer && onLevel(t) && tokVisible(t)) drawToken(t);
   drawZones('smoke');
+  drawZones('boron');
   drawFx(performance.now());
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2351,7 +2411,7 @@ function attackBlockedReason(t) {
   const targets = combatTargets(t);
   if (!targets.length) return role === 'player' ? 'No hostile in sight' : 'No valid target';
   const usable = targets.some(o => combatReach(t, o).ok);
-  if (!usable) return 'No target in reach for a ' + weaponOf(t).label;
+  if (!usable) return 'No target in reach or line of sight for a ' + weaponOf(t).label;
   return '';
 }
 function combatRow(t) {
@@ -2645,7 +2705,7 @@ function openCombat(attackerId) {
     const o = document.createElement('option');
     o.value = t.id;
     const reach = combatReach(a, t);
-    o.textContent = t.name + ' · ' + t.hp + '/' + t.maxHp + ' HP' + (reach.ok ? '' : ' · out of reach');
+    o.textContent = t.name + ' · ' + t.hp + '/' + t.maxHp + ' HP' + (reach.ok ? '' : (weaponOf(a).type === 'ranged' ? ' · blocked' : ' · out of reach'));
     sel.append(o);
   }
   sel.value = targets[0].id;
@@ -2672,7 +2732,7 @@ function updateCombatDialog() {
   const reach = combatReach(a, b);
   const w = weaponOf(b), d = computeStats(b.stats);
   $('#combatTargetStats').textContent = `HP ${b.hp}/${b.maxHp} · ${w.label} · ${w.type}${isDown(b) ? ' · down' : ''}`;
-  $('#combatRange').textContent = reach.text + (reach.ok ? '' : ' — move closer or use a ranged weapon');
+  $('#combatRange').textContent = reach.text + (reach.ok ? '' : (weaponOf(a).type === 'ranged' ? ' — move to a clear line of fire' : ' — move closer or use a ranged weapon'));
   $('#combatRange').dataset.ok = reach.ok ? 'yes' : 'no';
   $$('#combatMoves .force-option').forEach(btn => { btn.hidden = role !== 'gm'; });
   $$('#combatMoves [data-move]').forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.move === combatChosenMove ? 'true' : 'false'));
@@ -2793,13 +2853,14 @@ function emptyTileNear(x, y, mapKey) {
 function emitExchangeShots(a, b, aMove, bMove, opts = {}) {
   const mapKey = a.mapKey || (map ? map.key : '');
   if (mapKey !== (b.mapKey || mapKey)) return;
+  const neutralA = !!opts.neutralizedA, neutralB = !!opts.neutralizedB;
   const winner = exchangeWinner(a, b, aMove, bMove);
   if (opts.snap) {
     const target = opts.snapHit ? b : (opts.missPoint || emptyTileNear(b.x, b.y, mapKey));
-    if (weaponOf(a).type === 'ranged') {
+    if (weaponOf(a).type === 'ranged' && !neutralA) {
       emitFx({ kind: 'shot', mapKey, from: { x: a.x, y: a.y }, to: { x: target.x, y: target.y }, color: shotColorFor(a) });
     }
-    if ((winner === 'b' || winner === 'both') && weaponOf(b).type === 'ranged') {
+    if ((winner === 'b' || winner === 'both') && weaponOf(b).type === 'ranged' && !neutralB) {
       emitFx({ kind: 'shot', mapKey, from: { x: b.x, y: b.y }, to: { x: a.x, y: a.y }, color: shotColorFor(b) });
     }
     return;
@@ -2810,6 +2871,7 @@ function emitExchangeShots(a, b, aMove, bMove, opts = {}) {
     : [[a, b]];
   for (const [shooter, target] of shots) {
     if (weaponOf(shooter).type !== 'ranged') continue;
+    if (shooter === a ? neutralA : neutralB) continue;
     emitFx({ kind: 'shot', mapKey, from: { x: shooter.x, y: shooter.y }, to: { x: target.x, y: target.y }, color: shotColorFor(shooter) });
   }
 }
@@ -2821,7 +2883,9 @@ function resolveExchange(a, b, aMove, bMove, aiRoll, opts = {}) {
   // The coin is only flipped when the exchange would actually land the shot.
   const snapHit = !opts.snap ? true : ((winner === 'a' || winner === 'both') ? Math.random() >= 0.5 : false);
   const missPoint = opts.snap && !snapHit ? emptyTileNear(b.x, b.y, a.mapKey || (map ? map.key : '')) : null;
-  emitExchangeShots(a, b, aMove, bMove, { snap: !!opts.snap, snapHit, missPoint });
+  const neutralA = !!opts.neutralizedA, neutralB = !!opts.neutralizedB;
+  let announcedA = false, announcedB = false;
+  emitExchangeShots(a, b, aMove, bMove, { snap: !!opts.snap, snapHit, missPoint, neutralizedA: neutralA, neutralizedB: neutralB });
   messages.push(`${a.name} chooses ${MOVE_LABEL[aMove]}; ${b.name} reacts with ${bMove ? MOVE_LABEL[bMove] : 'nothing'}.` + (aiRoll ? ` (d20 ${aiRoll})` : ''));
   let missAnnounced = false;
   const hitB = (amount) => {
@@ -2832,7 +2896,24 @@ function resolveExchange(a, b, aMove, bMove, aiRoll, opts = {}) {
       }
       return 0;
     }
+    if (neutralA) {
+      if (!announcedA) {
+        announcedA = true;
+        messages.push(`The boron silicate cloud absorbs ${a.name}'s laser fire.`);
+      }
+      return 0;
+    }
     return dealCombatDamage(b, amount, messages);
+  };
+  const hitA = (amount) => {
+    if (neutralB) {
+      if (!announcedB) {
+        announcedB = true;
+        messages.push(`The boron silicate cloud absorbs ${b.name}'s laser fire.`);
+      }
+      return 0;
+    }
+    return dealCombatDamage(a, amount, messages);
   };
   if (!bMove) {
     const w = weaponOf(a);
@@ -2842,24 +2923,24 @@ function resolveExchange(a, b, aMove, bMove, aiRoll, opts = {}) {
     if (bMove === 'strike') {
       const aDmg = damageWithWeapon(a) + 0.25, bDmg = damageWithWeapon(b) + 0.25;
       const aDealt = hitB(aDmg);
-      dealCombatDamage(a, bDmg, messages);
-      messages.push(aDealt > 0 ? `Both ${a.name} and ${b.name} struck each other.` : `${b.name} struck ${a.name}; ${a.name}'s snap shot went wide.`);
+      hitA(bDmg);
+      messages.push(aDealt > 0 ? `Both ${a.name} and ${b.name} struck each other.` : `${b.name} struck ${a.name}; ${a.name}'s attack did not land.`);
     } else if (bMove === 'grapple') {
       const dealt = hitB(damageWithWeapon(a));
       if (dealt > 0) messages.push(`${a.name} ${attackVerb(a, choice(MISS.strike))} ${b.name}'s ${choice(HIT_ZONE)}.`);
     } else if (bMove === 'counter') {
-      dealCombatDamage(a, damageWithWeapon(b), messages);
+      hitA(damageWithWeapon(b));
       messages.push(`${b.name} saw ${a.name} telegraph their move, and countered by deflecting the shot and ${attackVerb(b, choice(MISS.strike))} their ${choice(HIT_ZONE)}.`);
     }
   } else if (aMove === 'grapple') {
     if (bMove === 'strike') {
-      dealCombatDamage(a, damageWithWeapon(b), messages);
+      hitA(damageWithWeapon(b));
       messages.push(`${b.name} ${attackVerb(b, choice(MISS.strike))} ${a.name}'s ${choice(HIT_ZONE)}.`);
     } else if (bMove === 'grapple') {
       const aHp = a.hp, bHp = b.hp;
       if (aHp === bHp) messages.push('Both combatants attempted to grapple each other; there was no clear winner.');
       else if (bHp > aHp) {
-        dealCombatDamage(a, damageWithWeapon(b), messages);
+        hitA(damageWithWeapon(b));
         messages.push(`${b.name} ${attackVerb(b, choice(MISS.grapple))} ${a.name}'s ${choice(GRAPPLE_ZONE)}.`);
       } else {
         const dealt = hitB(damageWithWeapon(a));
@@ -2874,7 +2955,7 @@ function resolveExchange(a, b, aMove, bMove, aiRoll, opts = {}) {
       const dealt = hitB(damageWithWeapon(a));
       if (dealt > 0) messages.push(`${a.name} saw ${b.name} telegraph their move, and countered by deflecting the shot and ${attackVerb(a, choice(MISS.strike))} their ${choice(HIT_ZONE)}.`);
     } else if (bMove === 'grapple') {
-      dealCombatDamage(a, damageWithWeapon(b), messages);
+      hitA(damageWithWeapon(b));
       messages.push(`${b.name} ${attackVerb(b, choice(MISS.grapple))} ${a.name}'s ${choice(GRAPPLE_ZONE)}.`);
     } else if (bMove === 'counter') {
       messages.push(`${a.name} and ${b.name} stare each other down.`);
@@ -2906,7 +2987,7 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   }
   if (role === 'player' && (a.layer !== 'player' || b.layer !== 'gm')) return { error: 'Players may only attack hostiles.' };
   const reach = combatReach(a, b);
-  if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
+  if (!reach.ok) return { error: `${a.name} cannot attack with a ${weaponOf(a).label}: ${reach.text}.` };
   const outranged = rangedAutoLoss(a, b);
   let aiRoll = null, bMove = reaction;
   if (outranged) {
@@ -2918,7 +2999,11 @@ function performAttack(attackerId, targetId, move, reaction, fromRemote = false,
   if (settings.turnBased && !opts.fromQueue && !opts.reflex && usesAp(a)) payAp(a, shot);
   missionToken(a); missionToken(b);
   missionDamageCtx = [];
-  const messages = resolveExchange(a, b, move, bMove, aiRoll, { snap: !!opts.snap || shot === 'snap' });
+  const neutralizedA = isLaserWeapon(a) && laserNeutralized(a, b);
+  const neutralizedB = isLaserWeapon(b) && laserNeutralized(b, a);
+  const messages = resolveExchange(a, b, move, bMove, aiRoll, {
+    snap: !!opts.snap || shot === 'snap', neutralizedA, neutralizedB
+  });
   if (outranged) messages.push(`${b.name} has no ranged weapon and cannot answer at this range.`);
   let aDamageTaken = 0, bDamageTaken = 0;
   for (const hit of missionDamageCtx) {
@@ -2957,7 +3042,7 @@ function performForcedExchange(attackerId, targetId, outcome, opts = {}) {
     if (turn.activeId !== a.id) return { error: 'It is not ' + a.name + "'s turn." };
   }
   const reach = combatReach(a, b);
-  if (!reach.ok) return { error: a.name + ' is out of reach with a ' + weaponOf(a).label + '.' };
+  if (!reach.ok) return { error: `${a.name} cannot attack with a ${weaponOf(a).label}: ${reach.text}.` };
 
   // Resolve the requested outcome through a concrete winning/losing stance
   // pair (Strike/Grapple for a win, Counter/Grapple for a loss), so the log
@@ -2965,7 +3050,9 @@ function performForcedExchange(attackerId, targetId, outcome, opts = {}) {
   const [aMove, bMove] = FORCE_RESULT_PAIRS[outcome];
   missionToken(a); missionToken(b);
   missionDamageCtx = [];
-  const messages = resolveExchange(a, b, aMove, bMove, null);
+  const neutralizedA = isLaserWeapon(a) && laserNeutralized(a, b);
+  const neutralizedB = isLaserWeapon(b) && laserNeutralized(b, a);
+  const messages = resolveExchange(a, b, aMove, bMove, null, { neutralizedA, neutralizedB });
   let aDamageTaken = 0, bDamageTaken = 0;
   for (const hit of missionDamageCtx) {
     if (hit.targetId === a.id) aDamageTaken += hit.amount;
@@ -3390,7 +3477,9 @@ function executeGrenade(t, itemName, x, y) {
       kind: g.kind, mapKey, x, y, radius: g.radius, turnsLeft: g.turns, ownerId: t.id
     });
     if (z) zones.push(z);
-    logEvent(`${t.name} throws a ${itemName}: ${g.kind === 'fire' ? 'fire' : 'smoke'} zone with a ${g.radius}-square radius for ${g.turns} player turns.`);
+    const cloud = g.kind === 'fire' ? 'fire' : g.kind === 'boron' ? 'boron silicate' : 'smoke';
+    const note = g.kind === 'boron' ? ' It absorbs all laser fire but harms no one.' : '';
+    logEvent(`${t.name} throws a ${itemName}: ${cloud} zone with a ${g.radius}-square radius for ${g.turns} player turns.${note}`);
   }
   fogDirty = true; lightDirty = true;
   return { ok: true, kind: g.kind, label: g.label };
@@ -4683,7 +4772,8 @@ async function handleAction(msg) {
       const shot = weaponOf(own).type === 'ranged' ? (action.shot === 'snap' ? 'snap' : 'aimed') : 'melee';
       const cost = apCostFor(shot);
       if (usesAp(own) && !canPayAp(own, shot)) { net.notify(clientId, `You need ${cost} AP for a ${AP_LABEL[shot]} (${fmt(apLeft(own))} left).`); scheduleSync(); return; }
-      if (!combatReach(own, target).ok) { net.notify(clientId, own.name + ' is out of reach with a ' + weaponOf(own).label + '.'); scheduleSync(); return; }
+      const reach = combatReach(own, target);
+      if (!reach.ok) { net.notify(clientId, own.name + ' cannot attack with a ' + weaponOf(own).label + ': ' + reach.text + '.'); scheduleSync(); return; }
       if (usesAp(own)) payAp(own, shot);
       const id = 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       pendingPlayerAttacks.set(id, {

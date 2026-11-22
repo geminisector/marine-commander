@@ -158,11 +158,15 @@ inventory.
   the fire takes 2 damage at the start of each of its turns.
 - **Frag grenade** — 4-square radius. Every token in the area immediately takes
   5 damage, including friendly tokens.
+- **Boron silicate grenade** — 3-square radius, lasting 5 player turns. The cloud
+  harms no one. It neutralises all laser weaponry: a laser fired by a character
+  inside the cloud, at a target inside it, or along a path that crosses it deals
+  no damage.
 
 Durations count unit turns, not the table's global turn counter: blindness
-counts down at the end of the affected unit's turns, while fire and smoke last
-for five player-character turns. Fire damage on the fifth player turn still
-applies before the zone expires.
+counts down at the end of the affected unit's turns, while fire, smoke and
+boron silicate clouds last for five player-character turns. Fire damage on the
+fifth player turn still applies before the zone expires.
 
 ### Medkits
 
@@ -368,9 +372,11 @@ Combat is a browser port of the supplied `melee.py` rules.
   `Damage = round(skill / 2)` (minimum 1), and `Max HP = Athletic × 2 + skill`.
   Changing a stat recalculates max HP while preserving damage already taken.
 - Weapons: knife, stick, club, sword and stun rod are melee; **laser, laser
-  rifle, mass driver and rifle are ranged**. Ranged attacks have no range limit. Melee
-  attacks need the tokens to be within `(attacker size + target size) / 2 + 0.5`
-  squares; otherwise the Attack button explains that the target is out of reach.
+  rifle, mass driver and rifle are ranged**. Ranged attacks have no range limit,
+  but they need a clear line of sight: walls and closed doors always block a
+  shot. Melee attacks need the tokens to be within
+  `(attacker size + target size) / 2 + 0.5` squares; otherwise the Attack button
+  explains that the target is out of reach.
 - **Action economy.** A player turn starts with a full AP pool (24 by default).
   Movement costs 1 AP per square; actions cost a percentage of the pool,
   rounded up: **pick up 26%**, **aimed shot 51%**, **snap shot 34%**,
