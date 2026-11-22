@@ -242,13 +242,34 @@ function parseColor(c) {
 }
 function showMsg(t) { const m = $('#msg'); m.textContent = t; m.hidden = !t; if (t) setTimeout(() => { m.hidden = true; }, 6000); }
 
+function imageMime(b64) {
+  const compact = String(b64 || '').replace(/\s+/g, '');
+  if (!compact) return '';
+  let head = '';
+  try { head = atob(compact.slice(0, 24)); } catch (e) { return ''; }
+  const b = i => head.charCodeAt(i);
+  if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) return 'image/jpeg';
+  if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) return 'image/png';
+  if (b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50) return 'image/webp';
+  if (b(0) === 0x47 && b(1) === 0x49 && b(2) === 0x46) return 'image/gif';
+  return '';
+}
+function imageSource(src) {
+  if (!src) return '';
+  src = String(src);
+  if (/^data:/i.test(src)) return src;
+  const mime = imageMime(src);
+  if (mime) return 'data:' + mime + ';base64,' + src.replace(/\s+/g, '');
+  return 'data:image/png;base64,' + src;
+}
+
 function loadMap(d, key) {
   return new Promise((resolve, reject) => {
     if (!d || !d.resolution || !d.image) return reject(new Error('This file is not a Universal VTT map (missing resolution or image).'));
     const img = new Image();
     img.onload = () => { try { build(d, img, key); resolve(); } catch (e) { reject(e); } };
     img.onerror = () => reject(new Error('The map image inside this file could not be decoded.'));
-    img.src = 'data:image/png;base64,' + d.image;
+    img.src = imageSource(d.image);
   });
 }
 

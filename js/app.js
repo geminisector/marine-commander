@@ -423,13 +423,28 @@ function cleanToken(t) {
 }
 
 /* ---------- map loading ---------- */
+function imageMime(b64) {
+  const compact = String(b64 || '').replace(/\s+/g, '');
+  if (!compact) return '';
+  let head = '';
+  try { head = atob(compact.slice(0, 24)); } catch (e) { return ''; }
+  const b = i => head.charCodeAt(i);
+  if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) return 'image/jpeg';
+  if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) return 'image/png';
+  if (b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50) return 'image/webp';
+  if (b(0) === 0x47 && b(1) === 0x49 && b(2) === 0x46) return 'image/gif';
+  return '';
+}
 function imageSource(d, base) {
   if (!d || !d.image) return '';
-  if (/^data:/i.test(d.image)) return d.image;
-  if (/^(https?:|blob:|\.{0,2}\/)/i.test(d.image) || /\.(png|jpe?g|webp|gif)$/i.test(d.image)) {
-    try { return new URL(d.image, base || location.href).href; } catch (e) { return d.image; }
+  const src = String(d.image).trim();
+  if (/^data:/i.test(src)) return src;
+  const mime = imageMime(src);
+  if (mime) return 'data:' + mime + ';base64,' + src.replace(/\s+/g, '');
+  if (/^(https?:|blob:|\.{0,2}\/)/i.test(src) || /\.(png|jpe?g|webp|gif)$/i.test(src)) {
+    try { return new URL(src, base || location.href).href; } catch (e) { return src; }
   }
-  return 'data:image/png;base64,' + d.image;
+  return 'data:image/png;base64,' + src;
 }
 function loadMap(d, key, base, meta) {
   return new Promise((resolve, reject) => {

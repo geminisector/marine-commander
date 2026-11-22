@@ -454,7 +454,9 @@ vtt/cortez.dd2vtt               original map file supplied with the project
 The single-file original embedded the map JSON and its PNG as base64. This
 version separates them: the map is a normal PNG plus a small JSON scene file,
 and the game/UI lives in `js/` and `css/`. Other `.dd2vtt` files can still be
-loaded in **Solo GM** mode.
+loaded in **Solo GM** mode. Embedded map images may be base64-encoded PNG,
+JPEG/JPG or WebP (raw base64 or a `data:` URL); the loader detects the format
+from the image bytes.
 
 ## Notes and limits
 

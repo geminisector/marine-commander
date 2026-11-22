@@ -166,7 +166,23 @@ function syncButtons(){
 }
 
 /* ---------- file I/O ---------- */
-function sniffMime(b64){ if(b64.startsWith("/9j/"))return "image/jpeg"; if(b64.startsWith("UklG"))return "image/webp"; return "image/png"; }
+function sniffMime(b64){
+  const s=String(b64||"").replace(/\s+/g,"");
+  if(!s) return "image/png";
+  let head="";
+  try{ head=atob(s.slice(0,24)); }catch(e){ return "image/png"; }
+  const b=i=>head.charCodeAt(i);
+  if(b(0)===0xff&&b(1)===0xd8&&b(2)===0xff)return "image/jpeg";
+  if(b(0)===0x89&&b(1)===0x50&&b(2)===0x4e&&b(3)===0x47)return "image/png";
+  if(b(0)===0x52&&b(1)===0x49&&b(2)===0x46&&b(3)===0x46&&b(8)===0x57&&b(9)===0x45&&b(10)===0x42&&b(11)===0x50)return "image/webp";
+  if(b(0)===0x47&&b(1)===0x49&&b(2)===0x46)return "image/gif";
+  return "image/png";
+}
+function imageDataUrl(b64){
+  const s=String(b64||"").trim();
+  if(/^data:/i.test(s)) return s;
+  return "data:"+sniffMime(s)+";base64,"+s.replace(/\s+/g,"");
+}
 
 function loadText(text, name){
   let data;
@@ -189,7 +205,7 @@ function loadText(text, name){
       if(!doc.resolution.map_size) doc.resolution.map_size = {x: im.naturalWidth/ppg(), y: im.naturalHeight/ppg()};
       fit(); draw(); };
     im.onerror = () => toast("Could not decode embedded image");
-    im.src = "data:"+sniffMime(imageB64)+";base64,"+imageB64;
+    im.src = imageDataUrl(imageB64);
   }
   if(!doc.resolution.map_size) doc.resolution.map_size = {x:20,y:20};
   $("empty").style.display = "none";
