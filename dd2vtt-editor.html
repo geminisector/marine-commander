@@ -2,28 +2,61 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
-<title>DD2VTT Editor · Marine Commander</title>
-<meta name="description" content="Edit DD2VTT battlemap files: walls, object edges, portals and lights.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
-<link rel="stylesheet" href="css/app.css">
-<link rel="stylesheet" href="css/editor.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DD2VTT Editor</title>
+<style>
+  :root{
+    --bg:#1b1d22; --panel:#23262d; --panel2:#2b2f38; --line:#3a3f4b; --text:#e6e8ec; --muted:#9aa1ae;
+    --accent:#5aa2ff; --wall:#ff5a5a; --obj:#ffa63d; --portal:#4aa8ff; --portal-open:#46d17a; --light:#ffd84a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  #app{display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:1fr 280px;height:100%}
+  #toolbar{grid-column:1/3;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+  #stage{position:relative;overflow:hidden;background:#101114}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+  #panel{background:var(--panel);border-left:1px solid var(--line);padding:10px 12px;overflow:auto}
+  #status{grid-column:1/3;display:flex;gap:16px;padding:5px 10px;background:var(--panel);border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  #status .hint{flex:1}
+  button,select{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+  button:hover,select:hover{border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+  button.active{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:600}
+  button.danger:hover{border-color:#ff5a5a;color:#ff8a8a}
+  .sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
+  label.chk{display:inline-flex;align-items:center;gap:5px;color:var(--muted);cursor:pointer;user-select:none}
+  h3{margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  h3:first-child{margin-top:0}
+  .row{display:flex;align-items:center;gap:8px;margin:5px 0}
+  .row>span{width:84px;color:var(--muted)}
+  .row input[type=number]{width:80px}
+  input[type=number]{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:3px 6px;font:inherit}
+  input[type=color]{width:38px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:none}
+  .muted{color:var(--muted)}
+  .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+  #empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;color:var(--muted);pointer-events:none}
+  #empty b{font-size:18px;color:var(--text)}
+  #empty button{pointer-events:auto}
+  #toast{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:#000c;padding:6px 12px;border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none}
+  #toast.show{opacity:1}
+  #drop{position:absolute;inset:0;border:3px dashed var(--accent);background:#5aa2ff22;display:none;pointer-events:none}
+  #modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:10}
+  #modal[hidden]{display:none}
+  .dlg{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;width:340px;max-width:92vw}
+  .dlg h2{margin:0 0 8px;font-size:16px}
+  .dlg .result{margin:10px 0;padding:8px;background:var(--bg);border-radius:6px}
+  .dlg .row>span{width:90px}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px}
+  @media (max-width:760px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr 200px auto}#toolbar,#status{grid-column:1}#panel{border-left:0;border-top:1px solid var(--line)}}
+</style>
 </head>
 <body>
 <div id="app">
-  <header id="topbar">
-    <div class="brand">
-      <span class="kicker">Marine Commander</span>
-      <h1>DD2VTT Editor</h1>
-    </div>
-    <a class="btn" href="index.html">← Back to splash</a>
-  </header>
-
   <div id="toolbar">
     <button id="btnOpen">Open…</button>
+    <button id="btnNew">New from image…</button>
+    <input type="file" id="fileImg" accept="image/png,image/jpeg,image/webp" hidden>
     <button id="btnSave" disabled>Save .dd2vtt</button>
     <input type="file" id="file" accept=".dd2vtt,.df2vtt,.uvtt,.json" hidden>
     <span class="sep"></span>
@@ -58,6 +91,19 @@
 
   <div id="panel"></div>
 
+  <div id="modal" hidden>
+    <div class="dlg">
+      <h2>New map from image</h2>
+      <div class="muted" id="nmInfo"></div>
+      <div class="row"><span>Set size by</span>
+        <select id="nmMode"><option value="x">Cells across (width)</option><option value="y">Cells down (height)</option></select></div>
+      <div class="row"><span>Cells</span><input type="number" id="nmCount" min="1" max="500" step="1" value="30"></div>
+      <div id="nmResult" class="result"></div>
+      <div class="btns" style="justify-content:flex-end">
+        <button id="nmCancel">Cancel</button><button id="nmOk" class="active">Create map</button></div>
+    </div>
+  </div>
+
   <div id="status"><span class="hint" id="hint"></span><span id="coords"></span></div>
 </div>
 
@@ -80,11 +126,6 @@ let undoS = [], redoS = [];
 let spaceDown = false;
 
 const ARR = {wall:"line_of_sight", obj:"objects_line_of_sight"};
-const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const COL = {
-  wall: cssVar("--ed-wall"), obj: cssVar("--ed-obj"), portal: cssVar("--ed-portal"),
-  portalOpen: cssVar("--ed-portal-open"), light: cssVar("--ed-light"), stage: cssVar("--stage")
-};
 const HINTS = {
   select:"Click to select · drag points/items to move · double-click a segment to add a point · Delete removes the selected item",
   wall:"Click to add points · Enter or double-click to finish · click the first point to close a loop · Esc cancels · Alt disables snapping",
@@ -170,6 +211,46 @@ function save(){
   toast("Saved "+a.download);
 }
 
+/* ---------- new map from image ---------- */
+let nm = null; // {b64, w, h, name}
+function nmCompute(){
+  const n = Math.max(1, Math.floor(+$("nmCount").value||0));
+  const byX = $("nmMode").value==="x";
+  const ppgv = Math.max(1, Math.round((byX?nm.w:nm.h)/n));
+  const cx = nm.w/ppgv, cy = nm.h/ppgv;
+  const f = v => Number.isInteger(v)?v:v.toFixed(2);
+  const exact = Math.abs((byX?nm.w:nm.h)/n - ppgv) < 1e-9;
+  $("nmResult").innerHTML = `Grid: <b>${f(cx)} × ${f(cy)}</b> cells at <b>${ppgv} px</b> per cell`
+    + (exact?"":`<br><span class="muted">Image size isn't an exact multiple, so the grid was rounded to whole pixels.</span>`);
+  return {ppg:ppgv, cx, cy};
+}
+function nmOpen(f){
+  if(!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const url = rd.result, im = new Image();
+    im.onload = () => {
+      nm = {b64:url.slice(url.indexOf(",")+1), w:im.naturalWidth, h:im.naturalHeight, name:f.name};
+      $("nmInfo").textContent = `${f.name} — ${nm.w}×${nm.h} px`;
+      $("nmCount").value = Math.max(1, Math.round(nm.w/70));
+      nmCompute(); $("modal").hidden=false; $("nmCount").focus(); $("nmCount").select();
+    };
+    im.onerror = () => toast("Could not read that image");
+    im.src = url;
+  };
+  rd.readAsDataURL(f);
+}
+function nmCreate(){
+  const r = nmCompute();
+  const data = {format:0.3,
+    resolution:{map_origin:{x:0,y:0}, map_size:{x:rnd(r.cx), y:rnd(r.cy)}, pixels_per_grid:r.ppg},
+    line_of_sight:[], objects_line_of_sight:[], portals:[],
+    environment:{baked_lighting:false, ambient_light:"ffffffff"}, lights:[], image:nm.b64};
+  $("modal").hidden = true;
+  loadText(JSON.stringify(data), nm.name.replace(/\.[^.]+$/,"")+".dd2vtt");
+  nm = null;
+}
+
 /* ---------- canvas ---------- */
 const cv = $("cv"), ctx = cv.getContext("2d");
 let dirty = false;
@@ -201,7 +282,7 @@ function render(){
   // image
   const ox = view.x + o.x*P*view.s, oy = view.y + o.y*P*view.s, ow = sz.x*P*view.s, oh = sz.y*P*view.s;
   if(img && $("showImg").checked) ctx.drawImage(img, ox, oy, ow, oh);
-  else { ctx.fillStyle=COL.stage; ctx.fillRect(ox,oy,ow,oh); }
+  else { ctx.fillStyle="#1d2026"; ctx.fillRect(ox,oy,ow,oh); }
 
   // grid
   if($("showGrid").checked){
@@ -229,7 +310,7 @@ function render(){
 
   // polylines
   for(const kind of ["obj","wall"]){
-    const color = kind==="wall" ? COL.wall : COL.obj;
+    const color = kind==="wall" ? "#ff5a5a" : "#ffa63d";
     doc[ARR[kind]].forEach((pts,i)=>{
       const isSel = sel && sel.kind===kind && sel.i===i;
       ctx.strokeStyle = color; ctx.lineWidth = isSel?3.5:2; ctx.lineJoin="round";
@@ -249,7 +330,7 @@ function render(){
   // portals
   doc.portals.forEach((p,i)=>{
     const a=toS(p.bounds[0]), b=toS(p.bounds[1]), isSel = sel&&sel.kind==="portal"&&sel.i===i;
-    ctx.strokeStyle = p.closed ? COL.portal : COL.portalOpen;
+    ctx.strokeStyle = p.closed ? "#4aa8ff" : "#46d17a";
     ctx.lineWidth = isSel?8:6; ctx.lineCap="butt";
     ctx.globalAlpha = .85; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.globalAlpha=1;
     if(isSel){ ctx.strokeStyle="#fff"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
@@ -266,7 +347,7 @@ function render(){
 
   // draft
   if(draft){
-    const color = draft.kind==="wall"?COL.wall:draft.kind==="obj"?COL.obj:COL.portal;
+    const color = draft.kind==="wall"?"#ff5a5a":draft.kind==="obj"?"#ffa63d":"#4aa8ff";
     ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.setLineDash([6,4]);
     ctx.beginPath();
     draft.pts.forEach((g,k)=>{const s=toS(g); k?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
@@ -557,6 +638,12 @@ function updatePanel(){
 
 /* ---------- wiring ---------- */
 $("btnOpen").onclick=$("btnOpen2").onclick=()=>$("file").click();
+$("btnNew").onclick=()=>{ if(doc&&undoS.length&&!confirm("Discard unsaved changes to the current map?")) return; $("fileImg").click(); };
+$("fileImg").onchange=e=>{ nmOpen(e.target.files[0]); e.target.value=""; };
+$("nmMode").onchange=$("nmCount").oninput=()=>nm&&nmCompute();
+$("nmCancel").onclick=()=>{ $("modal").hidden=true; nm=null; };
+$("nmOk").onclick=nmCreate;
+$("nmCount").onkeydown=e=>{ if(e.key==="Enter") nmCreate(); else if(e.key==="Escape") $("nmCancel").click(); };
 $("file").onchange=e=>{ openFile(e.target.files[0]); e.target.value=""; };
 $("btnSave").onclick=save; $("btnUndo").onclick=undo; $("btnRedo").onclick=redo; $("btnFit").onclick=fit;
 document.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
@@ -564,7 +651,7 @@ document.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>setTool(b.data
 
 window.addEventListener("dragover",e=>{e.preventDefault();$("drop").style.display="block";});
 window.addEventListener("dragleave",e=>{ if(e.target===document.documentElement||!e.relatedTarget) $("drop").style.display="none"; });
-window.addEventListener("drop",e=>{e.preventDefault();$("drop").style.display="none"; openFile(e.dataTransfer.files[0]);});
+window.addEventListener("drop",e=>{e.preventDefault();$("drop").style.display="none"; const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith("image/")) nmOpen(f); else openFile(f);});
 window.addEventListener("resize",resize);
 window.addEventListener("beforeunload",e=>{ if(undoS.length){ e.preventDefault(); e.returnValue=""; } });
 
