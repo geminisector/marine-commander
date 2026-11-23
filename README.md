@@ -282,42 +282,18 @@ sent through MQTT in live snapshots.
    [`dd2vtt-editor.html`](dd2vtt-editor.html) if you need to correct walls,
    doors, lights or the map image before importing it.
 
-2. **Generate the runtime pair.** Run this from the repository root. It extracts
-   the inline image and writes the matching `.scene.json`; it accepts raw or
-   `data:`-prefixed base64 and detects PNG, JPEG/JPG, WebP and GIF artwork:
+2. **Generate the runtime pair.** Run the converter from the repository root:
 
-    ```python
-    import base64, json, pathlib
-
-    src = pathlib.Path('assets/maps/newmap.dd2vtt')
-    d = json.loads(src.read_text())
-    image = d['image']
-    if image.startswith('data:'):
-        image = image.split(',', 1)[1]
-    raw = base64.b64decode(image)
-
-    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
-        ext = 'png'
-    elif raw.startswith(b'\xff\xd8\xff'):
-        ext = 'jpg'
-    elif raw.startswith(b'RIFF') and raw[8:12] == b'WEBP':
-        ext = 'webp'
-    elif raw.startswith(b'GIF8'):
-        ext = 'gif'
-    else:
-        raise SystemExit('Unsupported map image format')
-
-    image_path = src.with_suffix('.' + ext)
-    image_path.write_bytes(raw)
-    d['image'] = image_path.name
-    scene_path = src.with_suffix('.scene.json')
-    scene_path.write_text(json.dumps(d, separators=(',', ':')))
-    print('wrote', image_path, 'and', scene_path)
+    ```bash
+    python3 tools/import_dd2vtt.py assets/maps/newmap.dd2vtt
     ```
 
-    The scene keeps `resolution`, `line_of_sight`, `objects_line_of_sight`,
-    `portals`, `environment` and lights from the source. Only `image` changes,
-    from the inline data to the filename.
+    It extracts the inline image (`newmap.png`, or `.jpg`, `.webp` or `.gif`
+    depending on the source), writes `newmap.scene.json` with the UVTT geometry
+    and lights, and changes the scene's `image` field to the extracted filename.
+    It accepts raw or `data:`-prefixed base64. Pass `--force` to replace an
+    existing pair, or `--keep-lights` to keep an existing scene's hand-tuned
+    lights.
 
 3. **Register the map** in the `maps` array in
    [`js/config.js`](js/config.js):
@@ -361,19 +337,25 @@ sent through MQTT in live snapshots.
 
 The scene file is a snapshot. Editing the `.dd2vtt` — for example in
 `dd2vtt-editor.html` — does not change the map in the game. After saving the
-edited source, update the runtime pair:
+edited source, refresh the runtime pair:
 
-- Re-extract the image if the artwork changed, and keep the scene's `image`
-  pointing at the extracted file.
-- Replace `line_of_sight` when walls changed.
-- Replace `objects_line_of_sight` when object edges changed.
-- Replace `portals` when doors or windows changed.
-- Replace `environment` if the UVTT environment settings changed.
-- Keep the existing `lights` when the scene has hand-tuned lighting, unless the
-  source lights were deliberately updated too.
+```bash
+# Geometry only: walls, objects, doors and environment; keeps lights and image.
+python3 tools/import_dd2vtt.py --geometry-only assets/maps/newmap.dd2vtt
 
-Then reload the page and repeat the validation above. The map picker only reads
-the `.scene.json`, so deploy both the edited source and the updated scene.
+# Full refresh, including the artwork and UVTT lights.
+python3 tools/import_dd2vtt.py --force assets/maps/newmap.dd2vtt
+
+# Full refresh but keep the scene's existing hand-tuned lights.
+python3 tools/import_dd2vtt.py --force --keep-lights assets/maps/newmap.dd2vtt
+```
+
+`--geometry-only` copies `format`, `resolution`, `line_of_sight`,
+`objects_line_of_sight`, `portals` and `environment` into the existing scene and
+leaves `image` and `lights` alone. A full import replaces the extracted image
+and all scene data. Then reload the page and repeat the validation above. The
+map picker only reads the `.scene.json`, so deploy both the edited source and
+the updated scene.
 
 ### The Cortez boarding party
 
@@ -550,6 +532,7 @@ js/characters.js           generated roster imported from CombatBot
 js/net.js                  MQTT transport, room crypto, presence
 js/app.js                  map renderer, rules, turn/roster/state UI
 tools/import_character.py  CombatBot characters.db -> Marine Commander importer
+tools/import_dd2vtt.py     .dd2vtt -> .scene.json + extracted map image converter
 assets/maps/*.scene.json        extracted UVTT geometry for each deck (image path, no base64)
 assets/maps/*.png               extracted map images
 assets/maps/*.dd2vtt            original source maps
