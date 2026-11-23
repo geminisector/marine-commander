@@ -262,53 +262,118 @@ To add another stair, give both maps an entry; the ids only need to be unique
 within a map. Coordinates are grid squares; `ppg` must match the scene's
 pixels-per-grid.
 
-To add a new `.dd2vtt` file, extract its image once and register the scene in
-`js/config.js` (the `.dd2vtt` keeps the image inline, which is too large to sync
-through MQTT on every snapshot):
+#### Adding a new map
 
-```python
-import base64, io, json
-from PIL import Image
-src = 'assets/maps/newmap.dd2vtt'
-d = json.load(open(src))
-Image.open(io.BytesIO(base64.b64decode(d['image']))).save('assets/maps/newmap.png')
-d['image'] = 'newmap.png'
-json.dump(d, open('assets/maps/newmap.scene.json', 'w'), separators=(',', ':'))
-```
+This is the developer workflow for adding a map to the built-in catalog. A map
+has four parts:
 
-#### Adding a map to a live session
+- `assets/maps/newmap.dd2vtt` — the Universal VTT source, kept so the map can be
+  edited later;
+- `assets/maps/newmap.scene.json` — the runtime geometry copied from it;
+- an extracted image such as `assets/maps/newmap.png`;
+- an entry in the `maps` array in [`js/config.js`](js/config.js).
 
-Only the host/GM can add a map to a live session. Players cannot upload a map
-or change the map themselves; they follow the host's selection.
+The app never fetches the `.dd2vtt`. It fetches the scene JSON named in
+`js/config.js`, and the scene's `image` field points at the extracted image.
+Keeping the image out of the scene file prevents the base64 artwork from being
+sent through MQTT in live snapshots.
 
-1. Put `newmap.dd2vtt` in `assets/maps/`.
-2. Extract its image and geometry into `assets/maps/newmap.png` and
-   `assets/maps/newmap.scene.json` with the snippet above. The app loads this
-   extracted pair, not the `.dd2vtt`, so map data stays out of live snapshots.
-3. Register the scene in the `maps` array in [`js/config.js`](js/config.js):
+1. **Add the source file.** Put the `.dd2vtt` in `assets/maps/`. Use
+   [`dd2vtt-editor.html`](dd2vtt-editor.html) if you need to correct walls,
+   doors, lights or the map image before importing it.
+
+2. **Generate the runtime pair.** Run this from the repository root. It extracts
+   the inline image and writes the matching `.scene.json`; it accepts raw or
+   `data:`-prefixed base64 and detects PNG, JPEG/JPG, WebP and GIF artwork:
+
+    ```python
+    import base64, json, pathlib
+
+    src = pathlib.Path('assets/maps/newmap.dd2vtt')
+    d = json.loads(src.read_text())
+    image = d['image']
+    if image.startswith('data:'):
+        image = image.split(',', 1)[1]
+    raw = base64.b64decode(image)
+
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        ext = 'png'
+    elif raw.startswith(b'\xff\xd8\xff'):
+        ext = 'jpg'
+    elif raw.startswith(b'RIFF') and raw[8:12] == b'WEBP':
+        ext = 'webp'
+    elif raw.startswith(b'GIF8'):
+        ext = 'gif'
+    else:
+        raise SystemExit('Unsupported map image format')
+
+    image_path = src.with_suffix('.' + ext)
+    image_path.write_bytes(raw)
+    d['image'] = image_path.name
+    scene_path = src.with_suffix('.scene.json')
+    scene_path.write_text(json.dumps(d, separators=(',', ':')))
+    print('wrote', image_path, 'and', scene_path)
+    ```
+
+    The scene keeps `resolution`, `line_of_sight`, `objects_line_of_sight`,
+    `portals`, `environment` and lights from the source. Only `image` changes,
+    from the inline data to the filename.
+
+3. **Register the map** in the `maps` array in
+   [`js/config.js`](js/config.js):
 
     ```js
     {
       id: 'newmap',
       name: 'New map',
+      subtitle: 'Deck plan',   // optional
       scene: 'assets/maps/newmap.scene.json',
       ppg: 32
     }
     ```
 
-   Add `group`/`level` for multi-deck maps and `stairs` entries to link decks,
-   as described above.
-4. Deploy the updated `js/config.js`, scene and image files, then reload the
-   table. Every client must be able to fetch the same scene and image; the
-   host's local files are not sent to players.
+    - `id` must be unique and should stay stable: saved games, host
+      checkpoints and live snapshots refer to maps by this id.
+    - `name` and `subtitle` are the labels shown in the map picker.
+    - `scene` is the runtime JSON, never the `.dd2vtt`.
+    - `ppg` must match the scene's `resolution.pixels_per_grid` (the app also
+      reads that value from the scene, but the two should agree).
 
-If you are updating an existing map, update its `.scene.json` as well — the map
-picker never reads the `.dd2vtt` source. Preserve scene-only additions such as
-manually placed lights if you regenerate it.
+4. **Link decks if the map is multi-level.** Give every deck of the same ship
+   the same `group`, a distinct `level`, and reciprocal `stairs` entries as
+   described above. Stair `x`/`y`, `tx`/`ty` coordinates are grid squares, not
+   image pixels. A stair only works in the direction declared on the current
+   map, so each end needs its own entry.
 
-For a one-off custom map without changing the site, use **Solo GM → Load
-.dd2vtt**. That map stays local to that browser and cannot be shared with a
-live table.
+5. **Validate the import.** Start the local server with
+   `python3 -m http.server 4173`, open <http://127.0.0.1:4173>, and select the
+   new map from the picker. Check that walls follow the artwork, doors open in
+   the right places, lights cover the right rooms, and both ends of every stair
+   arrive at the matching marker. If you want to inspect the raw source before
+   generating the pair, use **Solo GM → Load .dd2vtt** as a local preview.
+
+6. **Commit and deploy all four pieces** — the source `.dd2vtt`, the
+   `.scene.json`, the extracted image and the `js/config.js` change. Every
+   client must be able to fetch the same scene and image; the host's local files
+   are not sent to players.
+
+**Updating an existing map**
+
+The scene file is a snapshot. Editing the `.dd2vtt` — for example in
+`dd2vtt-editor.html` — does not change the map in the game. After saving the
+edited source, update the runtime pair:
+
+- Re-extract the image if the artwork changed, and keep the scene's `image`
+  pointing at the extracted file.
+- Replace `line_of_sight` when walls changed.
+- Replace `objects_line_of_sight` when object edges changed.
+- Replace `portals` when doors or windows changed.
+- Replace `environment` if the UVTT environment settings changed.
+- Keep the existing `lights` when the scene has hand-tuned lighting, unless the
+  source lights were deliberately updated too.
+
+Then reload the page and repeat the validation above. The map picker only reads
+the `.scene.json`, so deploy both the edited source and the updated scene.
 
 ### The Cortez boarding party
 
@@ -371,8 +436,8 @@ storage keys.
 
 Players cannot add or switch maps during a live session; the host controls the
 map and everyone follows. To use a custom map locally, open **Solo GM → Load
-.dd2vtt**. Hosts can add a map for the whole table by following [Adding a map
-to a live session](#adding-a-map-to-a-live-session).
+.dd2vtt**. Hosts can add a map for the whole table by following [Adding a new
+map](#adding-a-new-map).
 
 ### Importing CombatBot characters
 
@@ -509,8 +574,8 @@ from the image bytes.
   **GM offline** and the table pauses until the GM resumes/reopens.
 - Custom `.dd2vtt` maps are solo-only; players cannot add maps to a live
   session. Live sessions use the maps registered in `js/config.js` so every
-  client can load the same scene (see [Adding a map to a live
-  session](#adding-a-map-to-a-live-session)).
+  client can load the same scene (see [Adding a new
+  map](#adding-a-new-map)).
 - The session code is the access boundary. Anyone with it can join the lobby,
   and a malicious participant could spam actions (the host rate-limits them).
   Use a private broker if you need stronger isolation.
