@@ -185,6 +185,98 @@ window.MC_CONFIG = {
           dir: 'up'
         }
       ]
+    },
+    {
+      id: 'rakshasha_deck1',
+      name: 'Rakshasha',
+      subtitle: 'Deck 1 · Command',
+      group: 'rakshasha',
+      level: 'Deck 1 · Command',
+      scene: 'assets/maps/TCS-Rakshasha_Deck1_Command.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 47, y: 35,
+          to: 'rakshasha_deck2',
+          tx: 47, ty: 35,
+          dir: 'down'
+        }
+      ]
+    },
+    {
+      id: 'rakshasha_deck2',
+      name: 'Rakshasha',
+      subtitle: 'Deck 2 · Crew',
+      group: 'rakshasha',
+      level: 'Deck 2 · Crew',
+      scene: 'assets/maps/TCS-Rakshasha_Deck2_Crew.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 47, y: 31,
+          to: 'rakshasha_deck1',
+          tx: 47, ty: 31,
+          dir: 'up'
+        },
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 47, y: 35,
+          to: 'rakshasha_deck3',
+          tx: 47, ty: 35,
+          dir: 'down'
+        }
+      ]
+    },
+    {
+      id: 'rakshasha_deck3',
+      name: 'Rakshasha',
+      subtitle: 'Deck 3 · Systems',
+      group: 'rakshasha',
+      level: 'Deck 3 · Systems',
+      scene: 'assets/maps/TCS-Rakshasha_Deck3_Systems.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 47, y: 31,
+          to: 'rakshasha_deck2',
+          tx: 47, ty: 31,
+          dir: 'up'
+        },
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 47, y: 35,
+          to: 'rakshasha_deck4',
+          tx: 47, ty: 35,
+          dir: 'down'
+        }
+      ]
+    },
+    {
+      id: 'rakshasha_deck4',
+      name: 'Rakshasha',
+      subtitle: 'Deck 4 · Cargo',
+      group: 'rakshasha',
+      level: 'Deck 4 · Cargo',
+      scene: 'assets/maps/TCS-Rakshasha_Deck4_Cargo.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 47, y: 31,
+          to: 'rakshasha_deck3',
+          tx: 47, ty: 31,
+          dir: 'up'
+        }
+      ]
     }
   ],
   // Lightweight UX gate for the GM buttons; this is not security.
