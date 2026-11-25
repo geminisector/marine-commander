@@ -747,6 +747,13 @@ function lightOn(l, open) {
 }
 function lightPass() {
   if (!map) return;
+  // Maps without UVTT lights are already fully lit artwork; do not black them out.
+  if (!map.lights.length) {
+    dg.clearRect(0, 0, dark.width, dark.height);
+    tg.clearRect(0, 0, tint.width, tint.height);
+    lightDirty = false;
+    return;
+  }
   const open = openRegions();
   dg.globalCompositeOperation = 'source-over'; dg.clearRect(0, 0, dark.width, dark.height);
   dg.fillStyle = `rgba(4,7,12,${settings.dark})`; dg.fillRect(0, 0, dark.width, dark.height);

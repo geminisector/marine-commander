@@ -421,6 +421,317 @@ window.MC_CONFIG = {
           dir: 'up'
         }
       ]
+    },
+    {
+      id: 'majestic_deck1',
+      name: 'Majestic',
+      subtitle: 'Deck 1 · Flight deck',
+      group: 'majestic',
+      level: 'Deck 1 · Flight deck',
+      scene: 'assets/maps/majestic/TCS-Majestic_Deck1.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 64.5, y: 29.5,
+          to: 'majestic_deck2',
+          tx: 64.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 85.5, y: 29.5,
+          to: 'majestic_deck2',
+          tx: 85.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 105.5, y: 29.5,
+          to: 'majestic_deck2',
+          tx: 105.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 127.5, y: 29.5,
+          to: 'majestic_deck2',
+          tx: 127.5, ty: 29.5,
+          dir: 'up'
+        }
+      ]
+    },
+    {
+      id: 'majestic_deck2',
+      name: 'Majestic',
+      subtitle: 'Deck 2 · Hangar gallery',
+      group: 'majestic',
+      level: 'Deck 2 · Hangar gallery',
+      scene: 'assets/maps/majestic/TCS-Majestic_Deck2.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 64.5, y: 29.5,
+          to: 'majestic_deck3',
+          tx: 64.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 85.5, y: 29.5,
+          to: 'majestic_deck3',
+          tx: 85.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 105.5, y: 29.5,
+          to: 'majestic_deck3',
+          tx: 105.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 127.5, y: 29.5,
+          to: 'majestic_deck3',
+          tx: 127.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 64.5, y: 36.5,
+          to: 'majestic_deck1',
+          tx: 64.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 85.5, y: 36.5,
+          to: 'majestic_deck1',
+          tx: 85.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 105.5, y: 36.5,
+          to: 'majestic_deck1',
+          tx: 105.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 127.5, y: 36.5,
+          to: 'majestic_deck1',
+          tx: 127.5, ty: 36.5,
+          dir: 'down'
+        }
+      ]
+    },
+    {
+      id: 'majestic_deck3',
+      name: 'Majestic',
+      subtitle: 'Deck 3 · Systems',
+      group: 'majestic',
+      level: 'Deck 3 · Systems',
+      scene: 'assets/maps/majestic/TCS-Majestic_Deck3.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 64.5, y: 29.5,
+          to: 'majestic_deck4',
+          tx: 64.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 85.5, y: 29.5,
+          to: 'majestic_deck4',
+          tx: 85.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 105.5, y: 29.5,
+          to: 'majestic_deck4',
+          tx: 105.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 127.5, y: 29.5,
+          to: 'majestic_deck4',
+          tx: 127.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 64.5, y: 36.5,
+          to: 'majestic_deck2',
+          tx: 64.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 85.5, y: 36.5,
+          to: 'majestic_deck2',
+          tx: 85.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 105.5, y: 36.5,
+          to: 'majestic_deck2',
+          tx: 105.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 127.5, y: 36.5,
+          to: 'majestic_deck2',
+          tx: 127.5, ty: 36.5,
+          dir: 'down'
+        }
+      ]
+    },
+    {
+      id: 'majestic_deck4',
+      name: 'Majestic',
+      subtitle: 'Deck 4 · Crew',
+      group: 'majestic',
+      level: 'Deck 4 · Crew',
+      scene: 'assets/maps/majestic/TCS-Majestic_Deck4.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 64.5, y: 29.5,
+          to: 'majestic_deck5',
+          tx: 64.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 85.5, y: 29.5,
+          to: 'majestic_deck5',
+          tx: 85.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 105.5, y: 29.5,
+          to: 'majestic_deck5',
+          tx: 105.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-4s-up',
+          name: 'Lift 4S · up',
+          x: 127.5, y: 29.5,
+          to: 'majestic_deck5',
+          tx: 127.5, ty: 29.5,
+          dir: 'up'
+        },
+        {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 64.5, y: 36.5,
+          to: 'majestic_deck3',
+          tx: 64.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 85.5, y: 36.5,
+          to: 'majestic_deck3',
+          tx: 85.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 105.5, y: 36.5,
+          to: 'majestic_deck3',
+          tx: 105.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 127.5, y: 36.5,
+          to: 'majestic_deck3',
+          tx: 127.5, ty: 36.5,
+          dir: 'down'
+        }
+      ]
+    },
+    {
+      id: 'majestic_deck5',
+      name: 'Majestic',
+      subtitle: 'Deck 5 · Command',
+      group: 'majestic',
+      level: 'Deck 5 · Command',
+      scene: 'assets/maps/majestic/TCS-Majestic_Deck5.scene.json',
+      ppg: 70,
+      stairs: [
+        {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 64.5, y: 36.5,
+          to: 'majestic_deck4',
+          tx: 64.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 85.5, y: 36.5,
+          to: 'majestic_deck4',
+          tx: 85.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 105.5, y: 36.5,
+          to: 'majestic_deck4',
+          tx: 105.5, ty: 36.5,
+          dir: 'down'
+        },
+        {
+          id: 'lift-4p-down',
+          name: 'Lift 4P · down',
+          x: 127.5, y: 36.5,
+          to: 'majestic_deck4',
+          tx: 127.5, ty: 36.5,
+          dir: 'down'
+        }
+      ]
     }
   ],
   // Lightweight UX gate for the GM buttons; this is not security.

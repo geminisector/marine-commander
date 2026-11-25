@@ -2,8 +2,8 @@
 Combat based on the Gemini Sector engine
 
 Marine Commander is a host-run battlemap for the Cortez, Kamekh, Dorkir,
-Dorkathi, Lumbari, Kilrathi Comm Station and TCS Rakshasha deck plans. The GM
-picks the map, opens doors, runs the hostiles,
+Dorkathi, Lumbari, Kilrathi Comm Station, TCS Rakshasha and TCS Majestic deck
+plans. The GM picks the map, opens doors, runs the hostiles,
 assigns turns, edits HP and inventory, and keeps the table in sync. Each player
 joins with a code, controls one character, moves and attacks on their turn, and
 has their own HP bar, inventory, combat stats and weapon.
@@ -227,7 +227,8 @@ fetch and never sends the image through the live session.
 Kamekh, Dorkir, Lumbari, the Kilrathi Comm Station, all four TCS Rakshasha
 decks and both Dorkathi decks have room lights baked into their scene files. In
 **Lighting → Follow doors**, opening a door lights that room; **All lights on**
-reveals every room at once.
+reveals every room at once. TCS Majestic has no UVTT lights, so its fully lit
+artwork is shown as-is.
 
 Dorkathi is split into **Lower deck** and **Upper deck**, grouped together in
 the picker. The two decks are connected at the **Central ladder** marker near
@@ -238,7 +239,10 @@ the middle of the ship. Lumbari is split into **Command deck** and
 turbolift** marker on each deck. TCS Rakshasha has four decks — **Command**,
 **Crew**, **Systems** and **Cargo** — chained together by four lift banks
 (**Lift 1** through **Lift 4**). On every deck the bank's **S** marker goes up
-toward Command and its **P** marker goes down toward Cargo.
+toward Command and its **P** marker goes down toward Cargo. TCS Majestic is
+also five decks — **Flight deck**, **Hangar gallery**, **Systems**, **Crew** and
+**Command** — chained by its own four lift banks: **S** goes up toward Command
+and **P** goes down toward the Flight deck.
 
 For any pair of connected decks:
 
