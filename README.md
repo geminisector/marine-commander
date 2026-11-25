@@ -11,6 +11,20 @@ has their own HP bar, inventory, combat stats and weapon.
 The app is **static** — no build step, no server, no environment variables — so
 it can be deployed directly to Vercel (or any static host) and still play live.
 
+## Walk the decks (first-person 3D)
+
+Open `walk.html` (e.g. `http://127.0.0.1:4173/walk.html#rakshasha_deck1`) to
+walk around any deck in three.js. Walls are extruded from the scene's
+`line_of_sight`, furniture from `objects_line_of_sight`, and the map art is the
+floor. Doors (`portals`) slide open as you approach and close behind you.
+
+- **W A S D** walk, **mouse** look, **Shift** run, **F** flashlight
+- **E** use a lift/ladder pad (from `stairs` in `js/config.js`)
+- **M** deck map with click-to-teleport; the header selector switches decks
+
+three.js r170 is vendored in `vendor/three/`; textures are CC0 from ambientCG
+(see `assets/textures/CREDITS.md`).
+
 ## Run it locally
 
 ```bash
