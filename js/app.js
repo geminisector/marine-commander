@@ -21,7 +21,7 @@ const LEGACY_KEYS = [
   ['cortez-client-id', CLIENT_KEY, 'session']
 ];
 const APP_NAME = 'Marine Commander';
-const FALLBACK_MAP = { id: 'cortez', name: 'Cortez', subtitle: 'Deck plan', scene: CFG.mapUrl || 'assets/maps/cortez.scene.json', ppg: 16 };
+const FALLBACK_MAP = { id: 'cortez', name: 'Cortez', subtitle: 'Deck plan', scene: CFG.mapUrl || 'assets/maps/cortez/cortez.scene.json', ppg: 16 };
 const MAPS = (Array.isArray(CFG.maps) && CFG.maps.length ? CFG.maps : [FALLBACK_MAP])
   .filter(m => m && typeof m.id === 'string' && m.id)
   .map(m => Object.assign({ ppg: 16 }, m));

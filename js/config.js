@@ -10,7 +10,7 @@ window.MC_CONFIG = {
   ],
   topicPrefix: 'marine-commander/v1',
   // Kept for backwards compatibility; the map picker uses `maps` below.
-  mapUrl: 'assets/maps/cortez.scene.json',
+  mapUrl: 'assets/maps/cortez/cortez.scene.json',
   // `ppg` is the UVTT pixels-per-grid. `stairs` coordinates are in grid squares.
   // Give a stair a matching return stair on the destination map to connect the
   // two decks. `group`/`level` only affect the labels in the map picker.
@@ -19,20 +19,20 @@ window.MC_CONFIG = {
       id: 'cortez',
       name: 'Cortez',
       subtitle: 'Deck plan',
-      scene: 'assets/maps/cortez.scene.json',
+      scene: 'assets/maps/cortez/cortez.scene.json',
       ppg: 16
     },
     {
       id: 'kamekh2',
       name: 'Kamekh',
       subtitle: 'Kamekh II',
-      scene: 'assets/maps/kamekh2.scene.json',
+      scene: 'assets/maps/kamekh2/kamekh2.scene.json',
       ppg: 32
     },
     {
       id: 'dorkir',
       name: 'Dorkir',
-      scene: 'assets/maps/dorkir.scene.json',
+      scene: 'assets/maps/dorkir/dorkir.scene.json',
       ppg: 20
     },
     {
@@ -41,7 +41,7 @@ window.MC_CONFIG = {
       subtitle: 'Lower deck',
       group: 'dorkathi',
       level: 'Lower deck',
-      scene: 'assets/maps/dorkathi_bottom.scene.json',
+      scene: 'assets/maps/dorkathi/dorkathi_bottom.scene.json',
       ppg: 30,
       stairs: [
         {
@@ -59,7 +59,7 @@ window.MC_CONFIG = {
       subtitle: 'Upper deck',
       group: 'dorkathi',
       level: 'Upper deck',
-      scene: 'assets/maps/dorkathi_top.scene.json',
+      scene: 'assets/maps/dorkathi/dorkathi_top.scene.json',
       ppg: 30,
       stairs: [
         {
@@ -77,7 +77,7 @@ window.MC_CONFIG = {
       subtitle: 'Command deck',
       group: 'lumbari',
       level: 'Command deck',
-      scene: 'assets/maps/lumbari_deck1_command_v2.scene.json',
+      scene: 'assets/maps/lumbari/lumbari_deck1_command_v2.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -102,7 +102,7 @@ window.MC_CONFIG = {
       subtitle: 'Engineering deck',
       group: 'lumbari',
       level: 'Engineering deck',
-      scene: 'assets/maps/lumbari_deck2_engineering_v2.scene.json',
+      scene: 'assets/maps/lumbari/lumbari_deck2_engineering_v2.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -127,7 +127,7 @@ window.MC_CONFIG = {
       subtitle: 'Upper deck',
       group: 'kcomm',
       level: 'Upper deck',
-      scene: 'assets/maps/kilrathi_comm_station_deck1_upper.scene.json',
+      scene: 'assets/maps/kilrathi_comm_station/kilrathi_comm_station_deck1_upper.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -146,7 +146,7 @@ window.MC_CONFIG = {
       subtitle: 'Middle deck',
       group: 'kcomm',
       level: 'Middle deck',
-      scene: 'assets/maps/kilrathi_comm_station_deck2_middle.scene.json',
+      scene: 'assets/maps/kilrathi_comm_station/kilrathi_comm_station_deck2_middle.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -173,7 +173,7 @@ window.MC_CONFIG = {
       subtitle: 'Lower deck',
       group: 'kcomm',
       level: 'Lower deck',
-      scene: 'assets/maps/kilrathi_comm_station_deck3_lower.scene.json',
+      scene: 'assets/maps/kilrathi_comm_station/kilrathi_comm_station_deck3_lower.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -192,7 +192,7 @@ window.MC_CONFIG = {
       subtitle: 'Deck 1 · Command',
       group: 'rakshasha',
       level: 'Deck 1 · Command',
-      scene: 'assets/maps/TCS-Rakshasha_Deck1_Command.scene.json',
+      scene: 'assets/maps/rakshasha/TCS-Rakshasha_Deck1_Command.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -211,7 +211,7 @@ window.MC_CONFIG = {
       subtitle: 'Deck 2 · Crew',
       group: 'rakshasha',
       level: 'Deck 2 · Crew',
-      scene: 'assets/maps/TCS-Rakshasha_Deck2_Crew.scene.json',
+      scene: 'assets/maps/rakshasha/TCS-Rakshasha_Deck2_Crew.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -238,7 +238,7 @@ window.MC_CONFIG = {
       subtitle: 'Deck 3 · Systems',
       group: 'rakshasha',
       level: 'Deck 3 · Systems',
-      scene: 'assets/maps/TCS-Rakshasha_Deck3_Systems.scene.json',
+      scene: 'assets/maps/rakshasha/TCS-Rakshasha_Deck3_Systems.scene.json',
       ppg: 70,
       stairs: [
         {
@@ -265,7 +265,7 @@ window.MC_CONFIG = {
       subtitle: 'Deck 4 · Cargo',
       group: 'rakshasha',
       level: 'Deck 4 · Cargo',
-      scene: 'assets/maps/TCS-Rakshasha_Deck4_Cargo.scene.json',
+      scene: 'assets/maps/rakshasha/TCS-Rakshasha_Deck4_Cargo.scene.json',
       ppg: 70,
       stairs: [
         {

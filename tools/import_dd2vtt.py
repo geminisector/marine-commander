@@ -7,10 +7,10 @@ this pair instead of the original .dd2vtt, which keeps the inline base64 artwork
 out of live snapshots.
 
 Examples:
-    python3 tools/import_dd2vtt.py assets/maps/newmap.dd2vtt
-    python3 tools/import_dd2vtt.py --force assets/maps/newmap.dd2vtt
-    python3 tools/import_dd2vtt.py --geometry-only assets/maps/cortez.dd2vtt
-    python3 tools/import_dd2vtt.py --keep-lights --force assets/maps/map.dd2vtt
+    python3 tools/import_dd2vtt.py assets/maps/newmap/newmap.dd2vtt
+    python3 tools/import_dd2vtt.py --force assets/maps/newmap/newmap.dd2vtt
+    python3 tools/import_dd2vtt.py --geometry-only assets/maps/cortez/cortez.dd2vtt
+    python3 tools/import_dd2vtt.py --keep-lights --force assets/maps/newmap/newmap.dd2vtt
 """
 
 from __future__ import annotations

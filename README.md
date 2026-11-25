@@ -220,9 +220,9 @@ session does not lose the mission history.
 
 ### Maps and decks
 
-The map picker lists the built-in scenes in `assets/maps/`. Each map is a UVTT
-scene file plus its PNG, so selecting a map is a small JSON fetch and never
-sends the image through the live session.
+The map picker lists the built-in scenes in `assets/maps/`, one folder per ship.
+Each map is a UVTT scene file plus its PNG, so selecting a map is a small JSON
+fetch and never sends the image through the live session.
 
 Kamekh, Dorkir, Lumbari, the Kilrathi Comm Station, all four TCS Rakshasha
 decks and both Dorkathi decks have room lights baked into their scene files. In
@@ -254,7 +254,7 @@ For any pair of connected decks:
   id: 'dorkathi_bottom',
   name: 'Dorkathi', subtitle: 'Lower deck',
   group: 'dorkathi', level: 'Lower deck',
-  scene: 'assets/maps/dorkathi_bottom.scene.json', ppg: 30,
+  scene: 'assets/maps/dorkathi/dorkathi_bottom.scene.json', ppg: 30,
   stairs: [{
     id: 'ladder-up', name: 'Central ladder · up',
     x: 19.5, y: 20, to: 'dorkathi_top', tx: 19.5, ty: 20
@@ -268,13 +268,13 @@ pixels-per-grid.
 
 #### Adding a new map
 
-This is the developer workflow for adding a map to the built-in catalog. A map
-has four parts:
+This is the developer workflow for adding a map to the built-in catalog. Each
+ship gets its own folder under `assets/maps/`. A map has four parts:
 
-- `assets/maps/newmap.dd2vtt` — the Universal VTT source, kept so the map can be
-  edited later;
-- `assets/maps/newmap.scene.json` — the runtime geometry copied from it;
-- an extracted image such as `assets/maps/newmap.png`;
+- `assets/maps/newmap/newmap.dd2vtt` — the Universal VTT source, kept so the map
+  can be edited later;
+- `assets/maps/newmap/newmap.scene.json` — the runtime geometry copied from it;
+- an extracted image such as `assets/maps/newmap/newmap.png`;
 - an entry in the `maps` array in [`js/config.js`](js/config.js).
 
 The app never fetches the `.dd2vtt`. It fetches the scene JSON named in
@@ -282,14 +282,15 @@ The app never fetches the `.dd2vtt`. It fetches the scene JSON named in
 Keeping the image out of the scene file prevents the base64 artwork from being
 sent through MQTT in live snapshots.
 
-1. **Add the source file.** Put the `.dd2vtt` in `assets/maps/`. Use
+1. **Add the source file.** Put the `.dd2vtt` in a ship folder such as
+   `assets/maps/newmap/`. Use
    [`dd2vtt-editor.html`](dd2vtt-editor.html) if you need to correct walls,
    doors, lights or the map image before importing it.
 
 2. **Generate the runtime pair.** Run the converter from the repository root:
 
     ```bash
-    python3 tools/import_dd2vtt.py assets/maps/newmap.dd2vtt
+    python3 tools/import_dd2vtt.py assets/maps/newmap/newmap.dd2vtt
     ```
 
     It extracts the inline image (`newmap.png`, or `.jpg`, `.webp` or `.gif`
@@ -307,7 +308,7 @@ sent through MQTT in live snapshots.
       id: 'newmap',
       name: 'New map',
       subtitle: 'Deck plan',   // optional
-      scene: 'assets/maps/newmap.scene.json',
+      scene: 'assets/maps/newmap/newmap.scene.json',
       ppg: 32
     }
     ```
@@ -345,13 +346,13 @@ edited source, refresh the runtime pair:
 
 ```bash
 # Geometry only: walls, objects, doors and environment; keeps lights and image.
-python3 tools/import_dd2vtt.py --geometry-only assets/maps/newmap.dd2vtt
+python3 tools/import_dd2vtt.py --geometry-only assets/maps/newmap/newmap.dd2vtt
 
 # Full refresh, including the artwork and UVTT lights.
-python3 tools/import_dd2vtt.py --force assets/maps/newmap.dd2vtt
+python3 tools/import_dd2vtt.py --force assets/maps/newmap/newmap.dd2vtt
 
 # Full refresh but keep the scene's existing hand-tuned lights.
-python3 tools/import_dd2vtt.py --force --keep-lights assets/maps/newmap.dd2vtt
+python3 tools/import_dd2vtt.py --force --keep-lights assets/maps/newmap/newmap.dd2vtt
 ```
 
 `--geometry-only` copies `format`, `resolution`, `line_of_sight`,
@@ -537,9 +538,9 @@ js/net.js                  MQTT transport, room crypto, presence
 js/app.js                  map renderer, rules, turn/roster/state UI
 tools/import_character.py  CombatBot characters.db -> Marine Commander importer
 tools/import_dd2vtt.py     .dd2vtt -> .scene.json + extracted map image converter
-assets/maps/*.scene.json        extracted UVTT geometry for each deck (image path, no base64)
-assets/maps/*.png               extracted map images
-assets/maps/*.dd2vtt            original source maps
+assets/maps/<ship>/*.scene.json extracted UVTT geometry for each deck (image path, no base64)
+assets/maps/<ship>/*.png        extracted map images
+assets/maps/<ship>/*.dd2vtt     original source maps
 assets/tokens/player/*          player character portraits
 assets/tokens/human/*           hostile boarding-party portraits
 assets/tokens/kilrathi/*        Kilrathi portraits
