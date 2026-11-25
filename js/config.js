@@ -196,6 +196,30 @@ window.MC_CONFIG = {
       ppg: 70,
       stairs: [
         {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 57, y: 44,
+          to: 'rakshasha_deck2',
+          tx: 57, ty: 44,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 73, y: 35,
+          to: 'rakshasha_deck2',
+          tx: 73, ty: 35,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 101, y: 37,
+          to: 'rakshasha_deck2',
+          tx: 101, ty: 37,
+          dir: 'down'
+        },
+        {
           id: 'lift-4p-down',
           name: 'Lift 4P · down',
           x: 47, y: 35,
@@ -215,12 +239,60 @@ window.MC_CONFIG = {
       ppg: 70,
       stairs: [
         {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 57, y: 22,
+          to: 'rakshasha_deck1',
+          tx: 57, ty: 22,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 73, y: 31,
+          to: 'rakshasha_deck1',
+          tx: 73, ty: 31,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 101, y: 29,
+          to: 'rakshasha_deck1',
+          tx: 101, ty: 29,
+          dir: 'up'
+        },
+        {
           id: 'lift-4s-up',
           name: 'Lift 4S · up',
           x: 47, y: 31,
           to: 'rakshasha_deck1',
           tx: 47, ty: 31,
           dir: 'up'
+        },
+        {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 57, y: 44,
+          to: 'rakshasha_deck3',
+          tx: 57, ty: 44,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 73, y: 35,
+          to: 'rakshasha_deck3',
+          tx: 73, ty: 35,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 101, y: 37,
+          to: 'rakshasha_deck3',
+          tx: 101, ty: 37,
+          dir: 'down'
         },
         {
           id: 'lift-4p-down',
@@ -242,12 +314,60 @@ window.MC_CONFIG = {
       ppg: 70,
       stairs: [
         {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 57, y: 22,
+          to: 'rakshasha_deck2',
+          tx: 57, ty: 22,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 73, y: 31,
+          to: 'rakshasha_deck2',
+          tx: 73, ty: 31,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 101, y: 29,
+          to: 'rakshasha_deck2',
+          tx: 101, ty: 29,
+          dir: 'up'
+        },
+        {
           id: 'lift-4s-up',
           name: 'Lift 4S · up',
           x: 47, y: 31,
           to: 'rakshasha_deck2',
           tx: 47, ty: 31,
           dir: 'up'
+        },
+        {
+          id: 'lift-1p-down',
+          name: 'Lift 1P · down',
+          x: 57, y: 44,
+          to: 'rakshasha_deck4',
+          tx: 57, ty: 44,
+          dir: 'down'
+        },
+        {
+          id: 'lift-2p-down',
+          name: 'Lift 2P · down',
+          x: 73, y: 35,
+          to: 'rakshasha_deck4',
+          tx: 73, ty: 35,
+          dir: 'down'
+        },
+        {
+          id: 'lift-3p-down',
+          name: 'Lift 3P · down',
+          x: 101, y: 37,
+          to: 'rakshasha_deck4',
+          tx: 101, ty: 37,
+          dir: 'down'
         },
         {
           id: 'lift-4p-down',
@@ -268,6 +388,30 @@ window.MC_CONFIG = {
       scene: 'assets/maps/rakshasha/TCS-Rakshasha_Deck4_Cargo.scene.json',
       ppg: 70,
       stairs: [
+        {
+          id: 'lift-1s-up',
+          name: 'Lift 1S · up',
+          x: 57, y: 22,
+          to: 'rakshasha_deck3',
+          tx: 57, ty: 22,
+          dir: 'up'
+        },
+        {
+          id: 'lift-2s-up',
+          name: 'Lift 2S · up',
+          x: 73, y: 31,
+          to: 'rakshasha_deck3',
+          tx: 73, ty: 31,
+          dir: 'up'
+        },
+        {
+          id: 'lift-3s-up',
+          name: 'Lift 3S · up',
+          x: 101, y: 29,
+          to: 'rakshasha_deck3',
+          tx: 101, ty: 29,
+          dir: 'up'
+        },
         {
           id: 'lift-4s-up',
           name: 'Lift 4S · up',

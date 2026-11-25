@@ -236,8 +236,9 @@ the middle of the ship. Lumbari is split into **Command deck** and
 (pairing the two ladder symbols on each deck). The Kilrathi Comm Station has
 **Upper**, **Middle** and **Lower** decks, chained together by the **Central
 turbolift** marker on each deck. TCS Rakshasha has four decks — **Command**,
-**Crew**, **Systems** and **Cargo** — chained together by the **Lift 4S** and
-**Lift 4P** markers: 4S goes up toward Command and 4P goes down toward Cargo.
+**Crew**, **Systems** and **Cargo** — chained together by four lift banks
+(**Lift 1** through **Lift 4**). On every deck the bank's **S** marker goes up
+toward Command and its **P** marker goes down toward Cargo.
 
 For any pair of connected decks:
 
